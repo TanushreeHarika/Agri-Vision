@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyLanguage(lang) {
         if (!translations[lang]) return;
 
-        // Translate all current elements with data-i18n
+        // Force translate all visible elements
         document.querySelectorAll('[data-i18n]').forEach(el => {
             translateElement(el, lang);
         });
@@ -29,9 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (el.tagName === 'OPTION') {
                 el.innerText = translations[lang][key];
             } else {
-                // Check if element has direct text content
-                el.childNodes.forEach(node => {
-                    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0) {
+                // If the element has direct text, replace it
+                // We check children to avoid deleting icons
+                Array.from(el.childNodes).forEach(node => {
+                    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') {
                         node.textContent = translations[lang][key];
                     }
                 });
@@ -39,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // MutationObserver to handle dynamic content (like Results page data)
+    // Observer for dynamic content
     const observer = new MutationObserver((mutations) => {
         const lang = localStorage.getItem('lang') || 'en';
         mutations.forEach((mutation) => {
