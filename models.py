@@ -66,6 +66,11 @@ class AnalysisHistory(db.Model):
     growth_result = db.Column(db.JSON, nullable=True)
     confidence = db.Column(db.Float, nullable=True)
     health_score = db.Column(db.Float, nullable=True)
+    # Geographic location fields
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    location_name = db.Column(db.String(255), nullable=True)
+    region = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
     def to_dict(self):
@@ -77,6 +82,10 @@ class AnalysisHistory(db.Model):
             'growth_result': self.growth_result,
             'confidence': self.confidence,
             'health_score': self.health_score,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'location_name': self.location_name,
+            'region': self.region,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

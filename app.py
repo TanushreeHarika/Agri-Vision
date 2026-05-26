@@ -14,6 +14,7 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from werkzeug.utils import secure_filename
+from io import BytesIO
 
 import base64
 import cv2
@@ -1159,17 +1160,6 @@ def export_pdf():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/dashboard")
-def dashboard():
-    farms = [
-        {"name": "GreenGrid Hub — Gujarat", "health": 82, "stage": "Matured Boll", "disease_risk": "Low", "yield_est": 740},
-        {"name": "North Field — Punjab", "health": 61, "stage": "Early Boll", "disease_risk": "Medium", "yield_est": 520},
-        {"name": "West Field — Maharashtra", "health": 45, "stage": "Cotton Bud", "disease_risk": "High", "yield_est": 310},
-        {"name": "East Field — Rajasthan", "health": 91, "stage": "Split Cotton Boll", "disease_risk": "Low", "yield_est": 860},
-    ]
-    return render_template("dashboard.html", farms=farms)
-
-
 @app.route("/history")
 def history():
     return render_template("history.html")
@@ -1915,6 +1905,315 @@ def forgot_password():
         flash('Password reset link sent to your email (demo feature)', 'info')
         return redirect(url_for('login'))
     return render_template('login.html')  # Reuse login template for now
+
+
+# --- Geographic Disease Mapping ---
+
+@app.route("/disease-map")
+@login_required
+def disease_map():
+    """Disease map page"""
+    return render_template('disease_map.html')
+
+
+@app.route("/api/disease-map")
+@login_required
+def api_disease_map():
+    """API endpoint for disease map data"""
+    from models import AnalysisHistory
+    from datetime import datetime, timedelta
+    
+    # Get filter parameters
+    disease_filter = request.args.get('disease', 'all')
+    time_filter = request.args.get('time', 'all')
+    confidence_filter = float(request.args.get('confidence', 0))
+    
+    # Build query - get all analyses first, then filter for location
+    if current_user.is_researcher():
+        query = AnalysisHistory.query
+    else:
+        query = AnalysisHistory.query.filter_by(user_id=current_user.id)
+    
+    # Apply time filter
+    if time_filter == 'today':
+        query = query.filter(AnalysisHistory.created_at >= datetime.utcnow().replace(hour=0, minute=0, second=0))
+    elif time_filter == 'week':
+        query = query.filter(AnalysisHistory.created_at >= datetime.utcnow() - timedelta(days=7))
+    elif time_filter == 'month':
+        query = query.filter(AnalysisHistory.created_at >= datetime.utcnow() - timedelta(days=30))
+    elif time_filter == 'year':
+        query = query.filter(AnalysisHistory.created_at >= datetime.utcnow() - timedelta(days=365))
+    
+    # Get analyses
+    analyses = query.all()
+    
+    # Filter for location data in Python (more flexible)
+    filtered_analyses = []
+    for a in analyses:
+        # Apply disease filter
+        if disease_filter != 'all':
+            if not a.disease_result or a.disease_result.get('predicted_class') != disease_filter:
+                continue
+        
+        # Apply confidence filter
+        if confidence_filter > 0:
+            if not a.confidence or a.confidence < confidence_filter / 100:
+                continue
+        
+        # Only include analyses with location data
+        if a.latitude and a.longitude:
+            filtered_analyses.append(a)
+    
+    # Calculate statistics
+    total_analyses = len(filtered_analyses)
+    healthy_count = sum(1 for a in filtered_analyses if a.disease_result and a.disease_result.get('predicted_class') == 'healthy')
+    diseased_count = total_analyses - healthy_count
+    avg_health_score = sum(a.health_score for a in filtered_analyses if a.health_score) / len([a for a in filtered_analyses if a.health_score]) if filtered_analyses else 0
+    regions = set(a.region for a in filtered_analyses if a.region)
+    
+    return jsonify({
+        'analyses': [a.to_dict() for a in filtered_analyses],
+        'stats': {
+            'total_analyses': total_analyses,
+            'healthy_count': healthy_count,
+            'diseased_count': diseased_count,
+            'avg_health_score': avg_health_score,
+            'regions_count': len(regions)
+        }
+    })
+
+
+# --- Advanced Dashboard ---
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    """Advanced dashboard page"""
+    return render_template('dashboard.html')
+
+
+@app.route("/api/dashboard-stats")
+@login_required
+def api_dashboard_stats():
+    """API endpoint for dashboard statistics"""
+    from models import AnalysisHistory
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+    
+    # Get all analyses for current user
+    if current_user.is_researcher():
+        analyses = AnalysisHistory.query.all()
+    else:
+        analyses = AnalysisHistory.query.filter_by(user_id=current_user.id).all()
+    
+    # Calculate basic statistics
+    total_analyses = len(analyses)
+    healthy_count = sum(1 for a in analyses if a.disease_result and a.disease_result.get('predicted_class') == 'healthy')
+    diseased_count = total_analyses - healthy_count
+    avg_health_score = sum(a.health_score for a in analyses if a.health_score) / len([a for a in analyses if a.health_score]) if analyses else 0
+    
+    # Disease distribution
+    disease_counts = defaultdict(int)
+    for a in analyses:
+        if a.disease_result:
+            disease = a.disease_result.get('predicted_class', 'unknown')
+            disease_counts[disease] += 1
+    
+    disease_distribution = {
+        'labels': [d.replace('_', ' ').title() for d in disease_counts.keys()],
+        'values': list(disease_counts.values())
+    }
+    
+    # Disease trends (last 7 days)
+    trend_labels = []
+    trend_data = defaultdict(list)
+    for i in range(7):
+        date = datetime.utcnow() - timedelta(days=6-i)
+        date_str = date.strftime('%Y-%m-%d')
+        trend_labels.append(date.strftime('%b %d'))
+        
+        day_analyses = [a for a in analyses if a.created_at.date() == date.date()]
+        for a in day_analyses:
+            if a.disease_result:
+                disease = a.disease_result.get('predicted_class', 'unknown')
+                trend_data[disease].append(1)
+    
+    # Create trend datasets
+    trend_datasets = []
+    colors = ['#22c55e', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4']
+    for idx, (disease, counts) in enumerate(trend_data.items()):
+        # Aggregate by day
+        daily_counts = []
+        for i in range(7):
+            date = datetime.utcnow() - timedelta(days=6-i)
+            day_analyses = [a for a in analyses if a.created_at.date() == date.date()]
+            count = sum(1 for a in day_analyses if a.disease_result and a.disease_result.get('predicted_class') == disease)
+            daily_counts.append(count)
+        
+        trend_datasets.append({
+            'label': disease.replace('_', ' ').title(),
+            'data': daily_counts,
+            'borderColor': colors[idx % len(colors)],
+            'backgroundColor': colors[idx % len(colors)] + '20',
+            'fill': False,
+            'tension': 0.4
+        })
+    
+    disease_trends = {
+        'labels': trend_labels,
+        'datasets': trend_datasets
+    }
+    
+    # Growth stage distribution
+    growth_counts = defaultdict(int)
+    for a in analyses:
+        if a.growth_result:
+            stage = a.growth_result.get('main_class', 'unknown')
+            growth_counts[stage] += 1
+    
+    growth_distribution = {
+        'labels': [g.replace('_', ' ').title() for g in growth_counts.keys()],
+        'values': list(growth_counts.values())
+    }
+    
+    # Regional data
+    region_counts = defaultdict(int)
+    for a in analyses:
+        if a.region:
+            region_counts[a.region] += 1
+    
+    regional_data = {
+        'labels': list(region_counts.keys()),
+        'values': list(region_counts.values())
+    }
+    
+    # Recent activity
+    recent_analyses = sorted(analyses, key=lambda x: x.created_at, reverse=True)[:10]
+    recent_activity = []
+    for a in recent_analyses:
+        disease = a.disease_result.get('predicted_class', 'unknown') if a.disease_result else 'unknown'
+        activity_type = 'disease' if disease != 'healthy' else 'healthy'
+        icon = 'exclamation-triangle' if disease != 'healthy' else 'check-circle'
+        
+        recent_activity.append({
+            'type': activity_type,
+            'icon': icon,
+            'title': f'{disease.replace("_", " ").title()} Detected',
+            'description': f'Confidence: {(a.confidence * 100):.1f}%' if a.confidence else 'No confidence data',
+            'time': a.created_at.strftime('%b %d, %Y %H:%M')
+        })
+    
+    return jsonify({
+        'stats': {
+            'total_analyses': total_analyses,
+            'healthy_count': healthy_count,
+            'diseased_count': diseased_count,
+            'avg_health_score': avg_health_score
+        },
+        'disease_distribution': disease_distribution,
+        'disease_trends': disease_trends,
+        'growth_distribution': growth_distribution,
+        'regional_data': regional_data,
+        'recent_activity': recent_activity
+    })
+
+
+# --- Automated Reporting ---
+
+@app.route("/reports")
+@login_required
+def reports():
+    """Reports page"""
+    return render_template('reports.html')
+
+
+@app.route("/api/generate-report/<analysis_id>")
+@login_required
+def generate_report(analysis_id):
+    """Generate PDF report for a single analysis"""
+    from models import AnalysisHistory
+    from services.report_service import ReportGenerator
+    
+    analysis = AnalysisHistory.query.get(analysis_id)
+    if not analysis:
+        return jsonify({'error': 'Analysis not found'}), 404
+    
+    # Check permission
+    if not current_user.is_researcher() and analysis.user_id != current_user.id:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    try:
+        generator = ReportGenerator()
+        report_data = {
+            'disease_result': analysis.disease_result,
+            'growth_result': analysis.growth_result,
+            'health_score': analysis.health_score,
+            'confidence': analysis.confidence
+        }
+        
+        user_info = {
+            'full_name': current_user.full_name,
+            'email': current_user.email,
+            'role': current_user.role
+        }
+        
+        pdf_bytes = generator.generate_analysis_report(report_data, user_info)
+        
+        return send_file(
+            BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'analysis_report_{analysis_id}.pdf'
+        )
+    except Exception as e:
+        logger.error(f"Error generating report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route("/api/generate-summary-report")
+@login_required
+def generate_summary_report():
+    """Generate summary PDF report for all analyses"""
+    from models import AnalysisHistory
+    from services.report_service import ReportGenerator
+    from datetime import datetime, timedelta
+    from io import BytesIO
+    
+    # Get date range
+    days = request.args.get('days', 30, type=int)
+    start_date = datetime.utcnow() - timedelta(days=days)
+    
+    # Get analyses
+    if current_user.is_researcher():
+        analyses = AnalysisHistory.query.filter(AnalysisHistory.created_at >= start_date).all()
+    else:
+        analyses = AnalysisHistory.query.filter(
+            AnalysisHistory.user_id == current_user.id,
+            AnalysisHistory.created_at >= start_date
+        ).all()
+    
+    try:
+        generator = ReportGenerator()
+        analyses_data = [a.to_dict() for a in analyses]
+        
+        user_info = {
+            'full_name': current_user.full_name,
+            'email': current_user.email,
+            'role': current_user.role
+        }
+        
+        date_range = f"Last {days} days"
+        pdf_bytes = generator.generate_summary_report(analyses_data, user_info, date_range)
+        
+        return send_file(
+            BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'summary_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+        )
+    except Exception as e:
+        logger.error(f"Error generating summary report: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':
