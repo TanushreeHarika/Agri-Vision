@@ -171,3 +171,225 @@ class AnalysisResult(db.Model):
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class Disease(db.Model):
+    """Model for cotton diseases"""
+    __tablename__ = 'diseases'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    scientific_name = db.Column(db.String(200), nullable=True)
+    description = db.Column(db.Text, nullable=False)
+    causes = db.Column(db.Text, nullable=True)
+    symptoms = db.Column(db.Text, nullable=True)
+    severity = db.Column(db.String(20), default='moderate')  # low, moderate, high, severe
+    spread_rate = db.Column(db.String(20), default='moderate')  # slow, moderate, fast
+    affected_parts = db.Column(db.String(200), nullable=True)  # leaves, stems, bolls, roots
+    favorable_conditions = db.Column(db.Text, nullable=True)
+    prevention = db.Column(db.Text, nullable=True)
+    image_url = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    treatments = db.relationship('Treatment', backref='disease', lazy=True, cascade='all, delete-orphan')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'scientific_name': self.scientific_name,
+            'description': self.description,
+            'causes': self.causes,
+            'symptoms': self.symptoms,
+            'severity': self.severity,
+            'spread_rate': self.spread_rate,
+            'affected_parts': self.affected_parts,
+            'favorable_conditions': self.favorable_conditions,
+            'prevention': self.prevention,
+            'image_url': self.image_url,
+            'treatments': [t.to_dict() for t in self.treatments]
+        }
+
+
+class Treatment(db.Model):
+    """Model for disease treatments"""
+    __tablename__ = 'treatments'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    disease_id = db.Column(db.Integer, db.ForeignKey('diseases.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # chemical, biological, cultural, integrated
+    description = db.Column(db.Text, nullable=False)
+    application_method = db.Column(db.Text, nullable=True)
+    dosage = db.Column(db.String(200), nullable=True)
+    timing = db.Column(db.String(200), nullable=True)
+    effectiveness = db.Column(db.String(20), default='high')  # low, moderate, high
+    cost = db.Column(db.String(20), default='moderate')  # low, moderate, high
+    precautions = db.Column(db.Text, nullable=True)
+    resistance_management = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'disease_id': self.disease_id,
+            'name': self.name,
+            'type': self.type,
+            'description': self.description,
+            'application_method': self.application_method,
+            'dosage': self.dosage,
+            'timing': self.timing,
+            'effectiveness': self.effectiveness,
+            'cost': self.cost,
+            'precautions': self.precautions,
+            'resistance_management': self.resistance_management
+        }
+
+
+class Symptom(db.Model):
+    """Model for disease symptoms for symptom checker"""
+    __tablename__ = 'symptoms'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(200), unique=True, nullable=False, index=True)
+    description = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), nullable=False)  # leaf, stem, boll, root, general
+    severity_indicator = db.Column(db.String(20), default='moderate')  # mild, moderate, severe
+    image_url = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Many-to-many relationship with diseases
+    associated_diseases = db.relationship('Disease', secondary='disease_symptoms', backref='related_symptoms')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'category': self.category,
+            'severity_indicator': self.severity_indicator,
+            'image_url': self.image_url
+        }
+
+
+class DiseaseSymptom(db.Model):
+    """Association table for diseases and symptoms"""
+    __tablename__ = 'disease_symptoms'
+    
+    disease_id = db.Column(db.Integer, db.ForeignKey('diseases.id'), primary_key=True)
+    symptom_id = db.Column(db.Integer, db.ForeignKey('symptoms.id'), primary_key=True)
+    confidence = db.Column(db.Float, default=0.5)  # How strongly this symptom indicates the disease
+
+
+class WeatherData(db.Model):
+    """Model for storing weather data"""
+    __tablename__ = 'weather_data'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    location_name = db.Column(db.String(200), nullable=False, index=True)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    temperature_avg = db.Column(db.Float, nullable=True)  # Average temperature in Celsius
+    temperature_max = db.Column(db.Float, nullable=True)  # Max temperature
+    temperature_min = db.Column(db.Float, nullable=True)  # Min temperature
+    humidity = db.Column(db.Float, nullable=True)  # Humidity percentage
+    rainfall = db.Column(db.Float, nullable=True)  # Rainfall in mm
+    wind_speed = db.Column(db.Float, nullable=True)  # Wind speed in km/h
+    pressure = db.Column(db.Float, nullable=True)  # Atmospheric pressure
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'location_name': self.location_name,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'date': self.date.isoformat() if self.date else None,
+            'temperature_avg': self.temperature_avg,
+            'temperature_max': self.temperature_max,
+            'temperature_min': self.temperature_min,
+            'humidity': self.humidity,
+            'rainfall': self.rainfall,
+            'wind_speed': self.wind_speed,
+            'pressure': self.pressure
+        }
+
+
+class DiseasePrediction(db.Model):
+    """Model for disease predictions based on weather"""
+    __tablename__ = 'disease_predictions'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    disease_id = db.Column(db.Integer, db.ForeignKey('diseases.id'), nullable=False)
+    location_name = db.Column(db.String(200), nullable=False)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    prediction_date = db.Column(db.Date, nullable=False, index=True)  # Date the prediction is for
+    risk_level = db.Column(db.String(20), nullable=False)  # low, moderate, high, severe
+    risk_score = db.Column(db.Float, nullable=False)  # 0-100 risk score
+    confidence = db.Column(db.Float, nullable=False)  # Model confidence
+    weather_factors = db.Column(db.JSON, nullable=True)  # Which weather factors contributed
+    recommended_actions = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    disease = db.relationship('Disease', backref='predictions')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'disease_id': self.disease_id,
+            'disease_name': self.disease.name if self.disease else None,
+            'location_name': self.location_name,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'prediction_date': self.prediction_date.isoformat() if self.prediction_date else None,
+            'risk_level': self.risk_level,
+            'risk_score': self.risk_score,
+            'confidence': self.confidence,
+            'weather_factors': self.weather_factors,
+            'recommended_actions': self.recommended_actions
+        }
+
+
+class DiseaseOccurrence(db.Model):
+    """Model for tracking historical disease occurrences for ML training"""
+    __tablename__ = 'disease_occurrences'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    disease_id = db.Column(db.Integer, db.ForeignKey('diseases.id'), nullable=False)
+    location_name = db.Column(db.String(200), nullable=False)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    occurrence_date = db.Column(db.Date, nullable=False, index=True)
+    severity = db.Column(db.String(20), nullable=False)  # low, moderate, high, severe
+    affected_area = db.Column(db.Float, nullable=True)  # Area affected in hectares
+    weather_data_id = db.Column(db.Integer, db.ForeignKey('weather_data.id'), nullable=True)
+    reported_by = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    disease = db.relationship('Disease', backref='occurrences')
+    weather_data = db.relationship('WeatherData', backref='disease_occurrences')
+    reporter = db.relationship('User', backref='reported_diseases')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'disease_id': self.disease_id,
+            'disease_name': self.disease.name if self.disease else None,
+            'location_name': self.location_name,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'occurrence_date': self.occurrence_date.isoformat() if self.occurrence_date else None,
+            'severity': self.severity,
+            'affected_area': self.affected_area,
+            'weather_data_id': self.weather_data_id,
+            'reported_by': self.reported_by,
+            'notes': self.notes
+        }

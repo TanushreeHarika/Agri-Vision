@@ -15,6 +15,182 @@
             background: #f5f7fa;
         }
         
+        /* Navigation Styles */
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            padding: 15px 0;
+            gap: 20px;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: white;
+            text-decoration: none;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .logo i {
+            font-size: 24px;
+        }
+        
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            gap: 5px;
+            align-items: center;
+            flex: 1;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        
+        .nav-menu::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .nav-menu li {
+            position: relative;
+        }
+        
+        .nav-menu a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 10px;
+            border-radius: 5px;
+            font-size: 13px;
+            transition: background 0.3s;
+            white-space: nowrap;
+        }
+        
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .nav-menu .dropdown {
+            position: relative;
+        }
+        
+        .nav-menu .dropdown-content {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: white;
+            min-width: 200px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            border-radius: 5px;
+            padding: 10px 0;
+            z-index: 1001;
+        }
+        
+        .nav-menu .dropdown:hover .dropdown-content {
+            display: block;
+        }
+        
+        .nav-menu .dropdown-content a {
+            color: #333;
+            padding: 10px 20px;
+            display: block;
+        }
+        
+        .nav-menu .dropdown-content a:hover {
+            background: #f5f7fa;
+        }
+        
+        .nav-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        @media (max-width: 1200px) {
+            .nav-menu {
+                gap: 3px;
+            }
+            
+            .nav-menu a {
+                padding: 7px 10px;
+                font-size: 13px;
+            }
+            
+            .logo {
+                font-size: 18px;
+            }
+        }
+        
+        @media (max-width: 1024px) {
+            .nav-menu {
+                gap: 2px;
+            }
+            
+            .nav-menu a {
+                padding: 6px 8px;
+                font-size: 12px;
+            }
+            
+            .logo {
+                font-size: 16px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .nav-toggle {
+                display: block;
+            }
+            
+            .nav-menu {
+                display: none;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                flex-direction: column;
+                padding: 20px;
+                gap: 10px;
+            }
+            
+            .nav-menu.active {
+                display: flex;
+            }
+            
+            .nav-menu li {
+                width: 100%;
+            }
+            
+            .nav-menu a {
+                padding: 12px;
+                display: block;
+            }
+            
+            .nav-menu .dropdown-content {
+                position: static;
+                box-shadow: none;
+                background: rgba(255,255,255,0.1);
+                padding-left: 20px;
+            }
+        }
+        
         .dashboard-container {
             padding: 20px;
             max-width: 1400px;
@@ -201,13 +377,20 @@
                 <i class="fas fa-leaf"></i>
                 <span>Agri-Vision</span>
             </a>
-            <ul class="nav-menu">
+            <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <ul class="nav-menu" id="nav-menu">
                 <li><a href="/">Home</a></li>
                 {% if current_user.is_authenticated %}
                     <li><a href="/analyze">Analyze</a></li>
                     <li><a href="/batch">Batch</a></li>
                     <li><a href="/disease-map">Disease Map</a></li>
                     <li><a href="/dashboard" class="active">Dashboard</a></li>
+                    <li><a href="/reports">Reports</a></li>
+                    <li><a href="/disease-database">Disease DB</a></li>
+                    <li><a href="/symptom-checker">Symptom Checker</a></li>
+                    <li><a href="/disease-forecast">Disease Forecast</a></li>
                     <li><a href="/history">History</a></li>
                     <li><a href="/profile">Profile</a></li>
                     {% if current_user.is_researcher() %}
@@ -320,6 +503,30 @@
     </div>
 
     <script>
+        // Mobile navigation toggle
+        const navToggle = document.getElementById('nav-toggle');
+        const navMenu = document.getElementById('nav-menu');
+        
+        if (navToggle && navMenu) {
+            navToggle.addEventListener('click', () => {
+                navMenu.classList.toggle('active');
+            });
+            
+            // Close menu when clicking on a link
+            navMenu.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', () => {
+                    navMenu.classList.remove('active');
+                });
+            });
+            
+            // Close menu when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!navMenu.contains(e.target) && !navToggle.contains(e.target)) {
+                    navMenu.classList.remove('active');
+                }
+            });
+        }
+        
         let diseaseChart, trendChart, growthChart, regionChart;
         
         async function loadDashboardData() {

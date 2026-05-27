@@ -321,7 +321,7 @@
     <script>
         async function loadAnalyses() {
             try {
-                const response = await fetch('/api/dashboard-stats');
+                const response = await fetch('/api/analyses');
                 if (!response.ok) {
                     throw new Error('Failed to load analyses');
                 }
@@ -332,13 +332,26 @@
                 // Clear existing options
                 select.innerHTML = '<option value="">-- Select an analysis --</option>';
                 
-                // Add analysis options (mock data for now)
-                // In production, this would load from actual analysis history
-                select.innerHTML += '<option value="demo1">Sample Analysis 1</option>';
-                select.innerHTML += '<option value="demo2">Sample Analysis 2</option>';
+                // Add analysis options from real data
+                if (data.analyses && data.analyses.length > 0) {
+                    data.analyses.forEach(analysis => {
+                        const option = document.createElement('option');
+                        option.value = analysis.id;
+                        option.textContent = `${analysis.disease} - ${analysis.date} (Health: ${analysis.health_score}%)`;
+                        select.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No analyses available';
+                    option.disabled = true;
+                    select.appendChild(option);
+                }
                 
             } catch (error) {
                 console.error('Error loading analyses:', error);
+                const select = document.getElementById('analysis-select');
+                select.innerHTML = '<option value="">-- Error loading analyses --</option>';
             }
         }
         

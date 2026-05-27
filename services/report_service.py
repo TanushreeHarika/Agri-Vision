@@ -97,6 +97,17 @@ class ReportGenerator:
         story.append(metadata_table)
         story.append(Spacer(1, 0.3*inch))
         
+        # Executive Summary
+        exec_summary_header = Paragraph("Executive Summary", self.custom_styles['header'])
+        story.append(exec_summary_header)
+        
+        exec_summary = self._generate_executive_summary(analysis_data)
+        for paragraph in exec_summary:
+            para = Paragraph(paragraph, self.custom_styles['body'])
+            story.append(para)
+        
+        story.append(Spacer(1, 0.3*inch))
+        
         # Disease Analysis Section
         disease_header = Paragraph("Disease Analysis Results", self.custom_styles['header'])
         story.append(disease_header)
@@ -142,6 +153,17 @@ class ReportGenerator:
                     ('GRID', (0, 0), (-1, -1), 1, colors.lightgrey)
                 ]))
                 story.append(prob_table)
+        
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Key Insights Section (New Feature)
+        insights_header = Paragraph("Key Insights", self.custom_styles['header'])
+        story.append(insights_header)
+        
+        insights = self._generate_key_insights(analysis_data)
+        for insight in insights:
+            insight_para = Paragraph(f"• {insight}", self.custom_styles['body'])
+            story.append(insight_para)
         
         story.append(Spacer(1, 0.3*inch))
         
@@ -202,6 +224,89 @@ class ReportGenerator:
         doc.build(story)
         buffer.seek(0)
         return buffer.getvalue()
+    
+    def _generate_executive_summary(self, analysis_data):
+        """Generate executive summary for the report"""
+        summary = []
+        
+        disease_result = analysis_data.get('disease_result', {})
+        disease = disease_result.get('predicted_class', 'healthy')
+        health_score = analysis_data.get('health_score', 0)
+        confidence = analysis_data.get('confidence', 0)
+        
+        # Opening statement
+        summary.append(f"This report presents a comprehensive analysis of cotton plant health and disease detection.")
+        summary.append(f"The analysis was performed with {confidence * 100:.1f}% confidence level.")
+        
+        # Health assessment
+        if health_score >= 80:
+            summary.append(f"The plant exhibits excellent health with a score of {health_score:.1f}%, indicating optimal growing conditions.")
+        elif health_score >= 60:
+            summary.append(f"The plant shows good health with a score of {health_score:.1f}%, suggesting favorable conditions with minor areas for improvement.")
+        elif health_score >= 40:
+            summary.append(f"The plant demonstrates moderate health with a score of {health_score:.1f}%, requiring attention to prevent deterioration.")
+        else:
+            summary.append(f"The plant displays poor health with a score of {health_score:.1f}%, necessitating immediate intervention to address critical issues.")
+        
+        # Disease status
+        if disease == 'healthy':
+            summary.append("No disease symptoms were detected during the analysis. The plant appears to be free from common cotton diseases.")
+        else:
+            disease_name = disease.replace('_', ' ').title()
+            summary.append(f"The analysis detected the presence of {disease_name}, which requires appropriate management strategies to mitigate potential yield losses.")
+        
+        # Growth stage context
+        growth_result = analysis_data.get('growth_result', {})
+        growth_stage = growth_result.get('main_class', '')
+        if growth_stage:
+            growth_name = growth_stage.replace('_', ' ').title()
+            summary.append(f"The plant is currently in the {growth_name} stage, which is critical for proper crop management decisions.")
+        
+        # Overall assessment
+        summary.append("Based on the comprehensive analysis, this report provides detailed recommendations to optimize plant health and maximize yield potential.")
+        
+        return summary
+    
+    def _generate_key_insights(self, analysis_data):
+        """Generate key insights based on analysis results"""
+        insights = []
+        
+        disease_result = analysis_data.get('disease_result', {})
+        disease = disease_result.get('predicted_class', 'healthy')
+        health_score = analysis_data.get('health_score', 0)
+        confidence = analysis_data.get('confidence', 0)
+        
+        # Health status insight
+        if health_score >= 80:
+            insights.append("Excellent plant health status detected.")
+        elif health_score >= 60:
+            insights.append("Good plant health with room for improvement.")
+        elif health_score >= 40:
+            insights.append("Moderate health - requires attention.")
+        else:
+            insights.append("Poor health status - immediate action needed.")
+        
+        # Disease insight
+        if disease == 'healthy':
+            insights.append("No disease symptoms detected - continue preventive measures.")
+        else:
+            insights.append(f"Disease identified: {disease.replace('_', ' ').title()} detected.")
+        
+        # Confidence insight
+        if confidence >= 0.9:
+            insights.append("High confidence in analysis results (>90%).")
+        elif confidence >= 0.7:
+            insights.append("Good confidence in analysis results (>70%).")
+        else:
+            insights.append("Moderate confidence - consider re-analysis for confirmation.")
+        
+        # Growth stage insight
+        growth_result = analysis_data.get('growth_result', {})
+        growth_stage = growth_result.get('main_class', '')
+        if growth_stage:
+            insights.append(f"Current growth stage: {growth_stage.replace('_', ' ').title()}.")
+        
+        return insights
     
     def _generate_recommendations(self, analysis_data):
         """Generate recommendations based on analysis results"""
