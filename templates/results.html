@@ -103,6 +103,62 @@
       </div>
       {% endif %}
 
+      <!-- Disease Forecast & Risk Analysis -->
+      {% if forecast %}
+      <div class="forecast-card" style="
+          margin: 2rem 0;
+          padding: 1.5rem;
+          background: linear-gradient(135deg, #f093fb15, #f5576c15);
+          border: 1px solid #dee2e6;
+          border-radius: 16px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      ">
+        <h3 style="margin: 0 0 1rem; color: #343a40; font-size: 1.1rem;">
+          📊 Disease Forecast & Risk Analysis
+        </h3>
+        <p style="margin: 0 0 1rem; color: #6c757d; font-size: 0.9rem;">
+          Location: {{ forecast.location }}
+        </p>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+          {% if forecast.weather_risk %}
+          <div style="text-align:center; padding: 1rem; background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);">
+            <div style="font-size: 1.5rem;">⚠️</div>
+            <div style="font-size: 1.1rem; font-weight: 600; color: #e74c3c;">{{ forecast.weather_risk.risk_level|default('Moderate')|title }}</div>
+            <div style="font-size: 0.75rem; color: #6c757d;">Weather-Based Risk</div>
+          </div>
+          {% endif %}
+          
+          {% if forecast.seasonal_risk %}
+          <div style="text-align:center; padding: 1rem; background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);">
+            <div style="font-size: 1.5rem;">📅</div>
+            <div style="font-size: 1.1rem; font-weight: 600; color: #9b59b6;">{{ forecast.seasonal_risk.risk_percentage|round(1) }}%</div>
+            <div style="font-size: 0.75rem; color: #6c757d;">{{ forecast.seasonal_risk.month_name }} Risk</div>
+          </div>
+          {% endif %}
+          
+          {% if forecast.peak_season %}
+          <div style="text-align:center; padding: 1rem; background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);">
+            <div style="font-size: 1.5rem;">🏔️</div>
+            <div style="font-size: 1.1rem; font-weight: 600; color: #f39c12;">{{ forecast.peak_season.month_name }}</div>
+            <div style="font-size: 0.75rem; color: #6c757d;">Peak Season</div>
+          </div>
+          {% endif %}
+        </div>
+        
+        {% if forecast.recommendations %}
+        <div style="background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);">
+          <h4 style="margin: 0 0 0.75rem; color: #343a40; font-size: 1rem;">💡 Weather-Based Recommendations</h4>
+          <ul style="margin: 0; padding-left: 1.25rem; color: #495057; font-size: 0.9rem;">
+            {% for rec in forecast.recommendations %}
+            <li style="margin-bottom: 0.5rem;">{{ rec }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <!-- Analyzed Image + Bounding Boxes -->
       {% if image_b64 %}
       <div class="result-img-container" style="position: relative; margin-bottom: 2rem">

@@ -439,11 +439,96 @@
                 </div>
             </div>
         </div>
+
+        <!-- Historical Pattern Analysis Section -->
+        <div class="historical-patterns-section" style="margin-top: 30px;">
+            <div class="forecast-chart">
+                <div class="chart-header">
+                    <h3><i class="fas fa-history"></i> Historical Pattern Analysis</h3>
+                    <p style="color: var(--text-color); opacity: 0.7;">ML insights from historical disease occurrences</p>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <button class="get-forecast-btn" onclick="loadHistoricalPatterns()" style="padding: 10px 20px; font-size: 14px;">
+                        <i class="fas fa-chart-bar"></i> Load Historical Analysis
+                    </button>
+                </div>
+
+                <div id="historical-insights" style="display: none;">
+                    <!-- Insights Cards -->
+                    <div class="dashboard-grid" style="margin-bottom: 20px;">
+                        <div class="risk-card">
+                            <div class="risk-card-header">
+                                <h3><i class="fas fa-chart-pie"></i> Total Occurrences</h3>
+                            </div>
+                            <div class="risk-value" id="total-occurrences">-</div>
+                            <div class="risk-label">Historical records</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-card-header">
+                                <h3><i class="fas fa-virus"></i> Most Common Disease</h3>
+                            </div>
+                            <div class="risk-value" id="most-common-disease" style="font-size: 1.2rem;">-</div>
+                            <div class="risk-label">Based on historical data</div>
+                        </div>
+                        <div class="risk-card">
+                            <div class="risk-card-header">
+                                <h3><i class="fas fa-map-marker-alt"></i> High Risk Region</h3>
+                            </div>
+                            <div class="risk-value" id="high-risk-region" style="font-size: 1.2rem;">-</div>
+                            <div class="risk-label">Most affected area</div>
+                        </div>
+                    </div>
+
+                    <!-- Peak Seasons Chart -->
+                    <div class="forecast-chart" style="margin-bottom: 20px;">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-calendar-alt"></i> Peak Disease Seasons</h3>
+                        </div>
+                        <div class="chart-container" id="peak-season-chart" style="height: 300px;">
+                            <canvas id="peakSeasonChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Regional Rankings -->
+                    <div class="forecast-chart" style="margin-bottom: 20px;">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-trophy"></i> Regional Disease Rankings</h3>
+                        </div>
+                        <div id="regional-rankings" style="max-height: 300px; overflow-y: auto;">
+                            <!-- Rankings will be loaded here -->
+                        </div>
+                    </div>
+
+                    <!-- Disease Trends -->
+                    <div class="forecast-chart" style="margin-bottom: 20px;">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-line"></i> Disease Trends (Last 12 Months)</h3>
+                        </div>
+                        <div id="disease-trends" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            <!-- Trends will be loaded here -->
+                        </div>
+                    </div>
+
+                    <!-- Weather Correlations -->
+                    <div class="forecast-chart">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-cloud-sun"></i> Weather-Disease Correlations</h3>
+                        </div>
+                        <div id="weather-correlations" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                            <!-- Correlations will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         let currentForecastData = null;
         let currentPredictions = null;
+        let peakSeasonChart = null;
 
         async function getForecast() {
             const locationName = document.getElementById('location-name').value;
@@ -661,6 +746,190 @@
                     <i class="fas fa-exclamation-triangle"></i> ${message}
                 </div>
             `;
+        }
+
+        // Historical Pattern Analysis Functions
+        async function loadHistoricalPatterns() {
+            const locationName = document.getElementById('location-name').value;
+            
+            try {
+                const response = await fetch(`/api/historical-patterns?location=${encodeURIComponent(locationName)}&include_weather=true`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load historical patterns');
+                }
+
+                displayHistoricalInsights(data);
+            } catch (error) {
+                alert('Error loading historical patterns: ' + error.message);
+            }
+        }
+
+        function displayHistoricalInsights(data) {
+            document.getElementById('historical-insights').style.display = 'block';
+            
+            // Display insights cards
+            document.getElementById('total-occurrences').textContent = data.total_occurrences;
+            document.getElementById('most-common-disease').textContent = data.insights.most_common_disease || 'N/A';
+            document.getElementById('high-risk-region').textContent = data.insights.high_risk_region || 'N/A';
+            
+            // Display peak seasons chart
+            displayPeakSeasonsChart(data.insights.peak_seasons);
+            
+            // Display regional rankings
+            displayRegionalRankings(data.insights.regional_hotspots);
+            
+            // Display disease trends
+            displayDiseaseTrends();
+            
+            // Display weather correlations
+            displayWeatherCorrelations(data.insights.weather_correlations);
+        }
+
+        function displayPeakSeasonsChart(peakSeasons) {
+            const ctx = document.getElementById('peakSeasonChart').getContext('2d');
+            
+            if (peakSeasonChart) {
+                peakSeasonChart.destroy();
+            }
+            
+            const diseases = Object.keys(peakSeasons);
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            
+            const datasets = diseases.map((disease, index) => {
+                const colors = [
+                    'rgba(255, 99, 132, 0.8)',
+                    'rgba(54, 162, 235, 0.8)',
+                    'rgba(255, 206, 86, 0.8)',
+                    'rgba(75, 192, 192, 0.8)',
+                    'rgba(153, 102, 255, 0.8)',
+                    'rgba(255, 159, 64, 0.8)',
+                    'rgba(199, 199, 199, 0.8)',
+                    'rgba(83, 102, 255, 0.8)'
+                ];
+                
+                const monthlyData = peakSeasons[disease].monthly_risk || {};
+                const data = months.map((_, i) => monthlyData[i + 1] || 0);
+                
+                return {
+                    label: disease,
+                    data: data,
+                    borderColor: colors[index % colors.length],
+                    backgroundColor: colors[index % colors.length].replace('0.8', '0.2'),
+                    fill: false,
+                    tension: 0.4
+                };
+            });
+            
+            peakSeasonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Risk %'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function displayRegionalRankings(hotspots) {
+            const container = document.getElementById('regional-rankings');
+            
+            if (!hotspots || hotspots.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-color);">No regional data available.</p>';
+                return;
+            }
+            
+            let html = '<div style="display: flex; flex-direction: column; gap: 10px;">';
+            hotspots.forEach((hotspot, index) => {
+                html += `
+                    <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: var(--bg-color); border-radius: 10px;">
+                        <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; font-weight: 700; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">#${index + 1}</span>
+                        <span style="flex: 1; font-weight: 500; color: var(--text-color);">${hotspot.location}</span>
+                        <span style="color: var(--text-color); opacity: 0.7;">${hotspot.occurrence_count} occurrences</span>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            container.innerHTML = html;
+        }
+
+        async function displayDiseaseTrends() {
+            const container = document.getElementById('disease-trends');
+            
+            const diseases = ['Bacterial Blight', 'Fusarium Wilt', 'Verticillium Wilt', 'Powdery Mildew'];
+            
+            let html = '';
+            
+            for (const disease of diseases) {
+                try {
+                    const response = await fetch(`/api/historical/disease-trend/${encodeURIComponent(disease)}`);
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        continue;
+                    }
+                    
+                    const trendIcon = data.trend === 'increasing' ? '📈' : data.trend === 'decreasing' ? '📉' : '➡️';
+                    const trendColor = data.trend === 'increasing' ? '#e74c3c' : data.trend === 'decreasing' ? '#27ae60' : '#f39c12';
+                    
+                    html += `
+                        <div style="background: var(--bg-color); padding: 15px; border-radius: 10px; border-left: 4px solid ${trendColor};">
+                            <h4 style="margin: 0 0 5px 0; color: var(--text-color); font-size: 0.95rem;">${disease}</h4>
+                            <p style="margin: 0; font-size: 1.2rem; font-weight: 700; color: ${trendColor};">${trendIcon} ${data.trend.toUpperCase()}</p>
+                            <p style="margin: 5px 0 0 0; color: var(--text-color); opacity: 0.7; font-size: 0.85rem;">${data.change_percent !== undefined ? data.change_percent + '% change' : 'N/A'}</p>
+                        </div>
+                    `;
+                } catch (error) {
+                    console.error(`Error fetching trend for ${disease}:`, error);
+                }
+            }
+            
+            container.innerHTML = html;
+        }
+
+        function displayWeatherCorrelations(correlations) {
+            const container = document.getElementById('weather-correlations');
+            
+            if (!correlations || Object.keys(correlations).length === 0) {
+                container.innerHTML = '<p style="color: var(--text-color);">No weather correlation data available.</p>';
+                return;
+            }
+            
+            let html = '';
+            
+            for (const [disease, factors] of Object.entries(correlations)) {
+                html += `
+                    <div style="background: var(--bg-color); padding: 15px; border-radius: 10px;">
+                        <h4 style="margin: 0 0 10px 0; color: var(--text-color); font-size: 0.95rem;">${disease}</h4>
+                        <ul style="margin: 0; padding-left: 20px; color: var(--text-color); opacity: 0.8; font-size: 0.9rem;">
+                            ${factors.temperature ? `<li>🌡️ Temperature: ${factors.temperature}</li>` : ''}
+                            ${factors.humidity ? `<li>💧 Humidity: ${factors.humidity}</li>` : ''}
+                            ${factors.rainfall ? `<li>🌧️ Rainfall: ${factors.rainfall}</li>` : ''}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
         }
 
         // Load forecast on page load with default values

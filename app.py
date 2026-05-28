@@ -1738,6 +1738,64 @@ def analyze():
                 )[:6]
                 results["weather"] = weather
 
+            # Add forecast data if location provided
+            forecast_data = None
+            if lat and lon and weather:
+                try:
+                    from services.disease_prediction_service import DiseasePredictor, HistoricalPatternAnalyzer
+                    from models import DiseaseOccurrence
+                    
+                    forecast_data = {
+                        'weather': weather,
+                        'location': city or f"{lat:.4f}, {lon:.4f}"
+                    }
+                    
+                    # Get disease prediction based on weather
+                    predictor = DiseasePredictor()
+                    detected_disease = results.get("disease", {}).get("predicted_class", "")
+                    if detected_disease:
+                        # Convert disease name to match database format
+                        disease_name = detected_disease.replace('_', ' ').title()
+                        
+                        # Get weather-based risk
+                        weather_risk = predictor.predict_disease_risk([weather], disease_name)
+                        if weather_risk:
+                            forecast_data['weather_risk'] = weather_risk[0] if weather_risk else None
+                        
+                        # Get historical insights
+                        try:
+                            occurrences = DiseaseOccurrence.query.limit(1000).all()
+                            occurrences_data = [o.to_dict() for o in occurrences]
+                            
+                            analyzer = HistoricalPatternAnalyzer()
+                            analyzer.train(occurrences_data)
+                            
+                            # Get peak season for detected disease
+                            peak_season = analyzer.get_peak_season(disease_name)
+                            if peak_season:
+                                forecast_data['peak_season'] = peak_season
+                            
+                            # Get current month risk
+                            current_month = datetime.now().month
+                            seasonal_patterns = analyzer.seasonal_patterns
+                            if disease_name in seasonal_patterns:
+                                monthly_risk = seasonal_patterns[disease_name].get(current_month, 0)
+                                forecast_data['seasonal_risk'] = {
+                                    'month': current_month,
+                                    'month_name': datetime(2024, current_month, 1).strftime('%B'),
+                                    'risk_percentage': monthly_risk
+                                }
+                            
+                            # Get weather recommendations
+                            if weather_risk and weather_risk[0]:
+                                risk_level = weather_risk[0].get('risk_level', 'moderate')
+                                recommendations = predictor.generate_recommendations(disease_name, risk_level)
+                                forecast_data['recommendations'] = recommendations
+                        except Exception as e:
+                            logger.warning(f"Could not get historical insights: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not fetch forecast data: {e}")
+
             if results.get("error"):
                 raise ValueError(results["error"])
 
@@ -1771,6 +1829,7 @@ def analyze():
                 raw_json=json.dumps(results, indent=2),
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 weather=weather,
+                forecast=forecast_data,
                 grad_cam_image_b64=results.get("grad_cam_image_b64"),
                 heatmap_only_b64=results.get("heatmap_only_b64"),
                 heatmap_image_path=results.get("heatmap_image_path"),
