@@ -2748,14 +2748,327 @@ main{
 
     .dashboard-card h3, .dashboard-card div, .dashboard-card span, .analysis-footer { color: #000000 !important; }
 
-[data-theme="dark"] .agri-scan-history-empty {
-    background: rgba(22, 27, 33, 0.6);
-    border-color: rgba(60, 179, 113, 0.15);
-    color: rgba(224, 224, 224, 0.8);
+    .fade-in {
+        opacity: 1 !important;
+        transform: none !important;
+        color: black !important;
+    }
 }
 
+/* Utility Classes */
+.no-print { display: block; }
 
 /* i18n Language Selector */
 .lang-selector-container { display: flex; align-items: center; gap: 8px; margin-left: 10px; }
 .lang-selector { padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color, #ccc); background: var(--bg-card, #fff); color: var(--text-color, #333); font-family: inherit; font-size: 0.9em; cursor: pointer; }
 .lang-selector:focus { outline: 2px solid var(--emerald-green, #2e8b57); }
+
+/* =========================================================
+   Issue #279: PDF Export Quality Improvements
+   
+   Fixes for:
+   1. Unwanted UI elements (buttons, interactive controls)
+   2. Recent Analyses section overflow across pages
+   3. Inconsistent PDF layout and spacing
+   4. Poor report styling
+========================================================= */
+
+/* Print/Export Utility Classes */
+.export-hide {
+    display: block;
+}
+
+@media print {
+    .export-hide,
+    .results-action-btn,
+    .agri-scan-history-delete,
+    #toggle-ai-focus,
+    .results-summary,
+    .results-pre,
+    .trail-container,
+    .theme-toggle-btn,
+    [onclick*="exportToPDF"],
+    [onclick*="exportExplainability"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+}
+
+/* Print-Specific Results Card Styling */
+@media print {
+    .results-card {
+        background: white !important;
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+        padding: 20mm !important;
+        margin: 0 !important;
+        page-break-inside: avoid;
+    }
+
+    .result-card {
+        background: white !important;
+        border: 1px solid #e0e0e0 !important;
+        box-shadow: none !important;
+        padding: 15pt !important;
+        margin-top: 12pt !important;
+        margin-bottom: 12pt !important;
+        page-break-inside: avoid;
+    }
+
+    .results-header {
+        margin-bottom: 20pt;
+        padding-bottom: 15pt;
+        border-bottom: 2pt solid #333;
+    }
+
+    .results-title {
+        color: #000 !important;
+        font-size: 24pt;
+        font-weight: 700;
+        margin-bottom: 8pt;
+    }
+
+    .results-subtitle {
+        color: #555 !important;
+        font-size: 11pt;
+        line-height: 1.6;
+        margin-bottom: 0;
+    }
+
+    .results-section-title {
+        color: #000 !important;
+        font-size: 16pt;
+        font-weight: 600;
+        margin-top: 15pt;
+        margin-bottom: 10pt;
+        padding-bottom: 8pt;
+        border-bottom: 1pt solid #ddd;
+    }
+
+    /* Print Table Styling */
+    .results-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10pt 0;
+        page-break-inside: avoid;
+    }
+
+    .results-table tr {
+        page-break-inside: avoid;
+    }
+
+    .results-table th {
+        background: #f0f0f0 !important;
+        color: #000 !important;
+        border: 1pt solid #ccc !important;
+        padding: 8pt;
+        text-align: left;
+        font-weight: 600;
+        font-size: 11pt;
+    }
+
+    .results-table td {
+        border: 1pt solid #ddd !important;
+        padding: 8pt;
+        color: #333 !important;
+        font-size: 10pt;
+    }
+
+    /* Print List Styling */
+    .results-list {
+        margin: 10pt 0;
+        padding-left: 20pt;
+        list-style: disc;
+    }
+
+    .results-list li {
+        color: #333 !important;
+        margin-bottom: 6pt;
+        font-size: 11pt;
+        line-height: 1.6;
+        page-break-inside: avoid;
+    }
+
+    /* Hide Recent Analyses Section or Style it Properly */
+    .agri-scan-history-panel,
+    .results-recent-analyses-panel {
+        page-break-inside: avoid;
+    }
+
+    .agri-scan-history-list {
+        display: grid;
+        grid-template-columns: 1fr !important;
+        gap: 10pt;
+        page-break-inside: avoid;
+    }
+
+    .agri-scan-history-card {
+        display: flex;
+        background: white !important;
+        border: 1pt solid #ddd !important;
+        padding: 10pt;
+        margin-bottom: 8pt;
+        page-break-inside: avoid;
+    }
+
+    .agri-scan-history-img {
+        width: 80pt;
+        height: 60pt;
+        object-fit: cover;
+        margin-right: 10pt;
+        flex-shrink: 0;
+    }
+
+    .agri-scan-history-body {
+        flex: 1;
+        padding: 0 !important;
+    }
+
+    .agri-scan-history-disease {
+        color: #000 !important;
+        font-weight: 600;
+        font-size: 11pt;
+        margin-bottom: 3pt;
+    }
+
+    .agri-scan-history-confidence,
+    .agri-scan-history-date {
+        color: #666 !important;
+        font-size: 10pt;
+        margin-bottom: 3pt;
+    }
+
+    .agri-scan-history-empty {
+        color: #999 !important;
+        text-align: center;
+        padding: 15pt !important;
+        background: #f9f9f9 !important;
+        border: 1pt dashed #ddd !important;
+    }
+
+    /* Print Report Footer */
+    .results-footer {
+        margin-top: 20pt;
+        padding-top: 15pt;
+        border-top: 1pt solid #ddd;
+        color: #666 !important;
+        font-size: 10pt;
+        page-break-inside: avoid;
+    }
+
+    /* Health Score Visualization */
+    .health-bar {
+        background: #f0f0f0 !important;
+        height: 8pt;
+        margin: 5pt 0;
+        border-radius: 4pt;
+        overflow: hidden;
+    }
+
+    .health-fill {
+        background: linear-gradient(90deg, #2E8B57, #4CAF50) !important;
+        box-shadow: none !important;
+        height: 100%;
+    }
+
+    /* Weather Section */
+    .weather-card {
+        background: #fafafa !important;
+        border: 1pt solid #ddd !important;
+        padding: 12pt;
+        margin: 12pt 0;
+        page-break-inside: avoid;
+    }
+
+    .weather-card h3 {
+        color: #000 !important;
+        font-size: 13pt;
+        margin-bottom: 8pt;
+    }
+
+    .w-stat {
+        background: white !important;
+        border: 1pt solid #e0e0e0 !important;
+        padding: 8pt;
+        text-align: center;
+        page-break-inside: avoid;
+    }
+
+    /* Recommendation Styling */
+    .recommendation-item,
+    .insight-item {
+        background: #f5f5f5 !important;
+        border-left: 3pt solid #2E8B57 !important;
+        padding: 10pt;
+        margin-bottom: 8pt;
+        page-break-inside: avoid;
+        color: #333 !important;
+        font-size: 10pt;
+        line-height: 1.6;
+    }
+
+    /* Print-Specific Spacing */
+    .main-content {
+        padding: 0 !important;
+        background: white !important;
+    }
+
+    body {
+        background: white !important;
+        color: #000 !important;
+        line-height: 1.5;
+    }
+
+    /* A4 Page Setup */
+    @page {
+        size: A4 portrait;
+        margin: 15mm;
+    }
+
+    /* Prevent Page Breaks in Critical Elements */
+    .result-card,
+    .results-table,
+    .recommendation-item,
+    .insight-item,
+    .weather-card {
+        page-break-inside: avoid;
+    }
+
+    /* Print Typography */
+    h1, h2, h3, h4, h5, h6 {
+        color: #000 !important;
+        page-break-after: avoid;
+        margin-top: 12pt;
+        margin-bottom: 8pt;
+    }
+
+    p {
+        color: #333 !important;
+        margin-bottom: 8pt;
+        orphans: 3;
+        widows: 3;
+    }
+
+    /* Remove Backdrop Filters */
+    .glass-card,
+    .glass-bg {
+        background: white !important;
+        backdrop-filter: none !important;
+        box-shadow: none !important;
+    }
+
+    /* Clean Borders for Print */
+    [data-theme="dark"] .result-card,
+    [data-theme="dark"] .results-card,
+    [data-theme="dark"] .weather-card {
+        background: white !important;
+        color: #000 !important;
+        border: 1pt solid #ccc !important;
+    }
+
+    [data-theme="dark"] .agri-scan-history-empty {
+        background: rgba(22, 27, 33, 0.6);
+        border-color: rgba(60, 179, 113, 0.15);
+        color: rgba(224, 224, 224, 0.8);
+    }
+}

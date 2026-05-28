@@ -956,108 +956,69 @@
     });
 
     // PDF Export Functions
-    function exportToPDF() {
-      const btn = event.target.closest('button');
-      const originalHTML = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+async function exportToPDF() {
+  const { jsPDF } = window.jspdf;
+  const element = document.querySelector('.results-card');
+  const exportBtn = document.querySelector('button[onclick*="exportToPDF"]') || event.target.closest('button');
+  const originalBtnText = exportBtn.innerHTML;
 
-      try {
-        // Collect analysis data from the page
-        const diseaseElement = document.querySelector('[data-i18n="res_growth_title"]');
-        const disease = {
-          detected_issue: '{{ disease.detected_issue|default("Unknown") }}',
-          model_confidence: {{ disease.model_confidence|default(0)|float|round(1) }},
-          health_score: {{ disease.health_score|default(0)|float|round(1) }}
-        };
-        const growth = {
-          main_class: '{{ growth.main_class|default("Unknown") }}',
-          confidence: {{ growth.confidence|default(0)|float|round(1) }}
-        };
-        const recommendations = {{ results.recommendations|default([])|tojson }};
-        const timestamp = '{{ timestamp|default("") }}';
-        const imageB64 = document.getElementById('result-img')?.src || '{{ image_b64|default("") }}';
+  exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating PDF...';
+  exportBtn.disabled = true;
 
-        // Get weather data if present
-        const weatherData = {};
-        {% if weather %}
-          weatherData.temperature = {{ weather.temperature|default('null') }};
-          weatherData.humidity = {{ weather.humidity|default('null') }};
-          weatherData.precipitation = {{ weather.precipitation|default('null') }};
-          weatherData.description = '{{ weather.description|default("") }}';
-        {% endif %}
+  // Comprehensive element exclusion for cleaner PDF export (Issue #279)
+  const excludeElements = element.querySelectorAll(
+    '.no-print, .export-hide, .upload-btn, #toggle-ai-focus, ' +
+    '.results-summary, .results-pre, .trail-container, .theme-toggle-btn, ' +
+    '[onclick*="exportToPDF"], [onclick*="exportExplainability"], ' +
+    '.agri-scan-history-delete, .results-action-btn, ' +
+    'button[onclick*="readInsights"]'
+  );
+  
+  excludeElements.forEach(el => el.setAttribute('data-html2canvas-ignore', 'true'));
 
-        // Get yield data if present
-        const yieldData = {};
-        {% if yield_estimate %}
-          yieldData.yield_min_acre = {{ yield_estimate.yield_min_acre|default('null') }};
-          yieldData.yield_max_acre = {{ yield_estimate.yield_max_acre|default('null') }};
-          yieldData.yield_min_total = {{ yield_estimate.yield_min_total|default('null') }};
-          yieldData.yield_max_total = {{ yield_estimate.yield_max_total|default('null') }};
-        {% endif %}
+  try {
+    const canvas = await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff',
+      allowTaint: true,
+      foreignObjectRendering: true
+    });
 
-        // Prepare payload
-        const payload = {
-          disease_detected: disease.detected_issue,
-          disease_confidence: disease.model_confidence,
-          health_score: disease.health_score,
-          growth_stage: growth.main_class,
-          growth_confidence: growth.confidence,
-          image_b64: imageB64,
-          recommendations: recommendations,
-          timestamp: timestamp,
-          weather_data: weatherData,
-          yield_estimate: yieldData
-        };
+    const imgData = canvas.toDataURL('image/jpeg', 1.0);
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
 
-        // Send to backend
-        fetch('/api/analyze/download-report', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload)
-        })
-        .then(response => {
-          if (!response.ok) {
-            return response.json().then(data => {
-              throw new Error(data.error || 'Failed to generate PDF');
-            });
-          }
-          return response.blob();
-        })
-        .then(blob => {
-          // Create download link
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `agri_vision_crop_analysis_${new Date().toISOString().split('T')[0]}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-          document.body.removeChild(a);
+    const margin = 12; // Improved margins for professional appearance
+    const imgWidth = pdfWidth - (margin * 2);
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
-          btn.disabled = false;
-          btn.innerHTML = originalHTML;
-          showNotification('PDF downloaded successfully!', 'success');
-        })
-        .catch(error => {
-          console.error('PDF generation error:', error);
-          btn.disabled = false;
-          btn.innerHTML = originalHTML;
-          showNotification(`Error generating PDF: ${error.message}`, 'error');
+    let heightLeft = imgHeight;
+    let position = margin;
 
-          // Fallback to screenshot PDF
-          console.log('Attempting fallback screenshot PDF...');
-          exportToScreenshotPDF();
-        });
-      } catch (error) {
-        console.error('Error in exportToPDF:', error);
-        btn.disabled = false;
-        btn.innerHTML = originalHTML;
-        showNotification('Error preparing PDF export', 'error');
-      }
+    pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight);
+    heightLeft -= (pdfHeight - margin * 2);
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight + margin;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight);
+      heightLeft -= (pdfHeight - margin * 2);
     }
+
+    pdf.save(`Agri-Vision-Analysis-Report-${new Date().getTime()}.pdf`);
+  } catch (error) {
+    console.error('PDF Export Error:', error);
+    alert('Could not generate PDF. Using browser print as fallback.');
+    window.print();
+  } finally {
+    exportBtn.innerHTML = originalBtnText;
+    exportBtn.disabled = false;
+    excludeElements.forEach(el => el.removeAttribute('data-html2canvas-ignore'));
+  }
+}
 
     function exportToScreenshotPDF() {
       const btn = event?.target?.closest('button');
@@ -1225,43 +1186,6 @@
       document.head.appendChild(style);
     }
     </script>
-
-    const imgData = canvas.toDataURL('image/jpeg', 1.0);
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    
-    const margin = 10;
-    const imgWidth = pdfWidth - (margin * 2);
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    
-    let heightLeft = imgHeight;
-    let position = margin;
-
-    // Add first page
-    pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight);
-    heightLeft -= (pdfHeight - margin * 2);
-
-    // Add subsequent pages if content is long
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight + margin;
-      pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight);
-      heightLeft -= (pdfHeight - margin * 2);
-    }
-
-    pdf.save(`Agri-Vision-Analysis-Report-${new Date().getTime()}.pdf`);
-  } catch (error) {
-    console.error('PDF Error:', error);
-    alert('Could not generate PDF directly. Using browser print as fallback.');
-    window.print();
-  } finally {
-    exportBtn.innerHTML = originalBtnText;
-    exportBtn.disabled = false;
-    // Cleanup
-    excludeElements.forEach(el => el.removeAttribute('data-html2canvas-ignore'));
-  }
-}
 
 function readInsights() {
   var insights = [];
