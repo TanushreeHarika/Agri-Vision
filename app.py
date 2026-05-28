@@ -47,6 +47,12 @@ from services.weather_service import (
     geocode_city,
     get_weather,
 )
+from services.gradcam import (
+    GradCAM,
+    apply_heatmap_on_image,
+    generate_gradcam_explanation,
+    generate_pure_heatmap,
+)
 from services.yield_service import estimate_yield
 
 load_dotenv()
@@ -81,6 +87,7 @@ LANG = {
 
 os.makedirs("static/uploads", exist_ok=True)
 os.makedirs("static/css", exist_ok=True)
+os.makedirs("static/generated/gradcam", exist_ok=True)
 os.makedirs("models", exist_ok=True)
 
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}
@@ -254,7 +261,7 @@ yolo_model = None
 
 def load_models():
     """Wrapper for backward compatibility"""
-    global resnet_model, yolo_model, grad_cam_instance
+    global resnet_model, yolo_model
 
     if resnet_model is None:
         try:
@@ -316,101 +323,6 @@ def generate_mock_heatmap(image_rgb: np.ndarray) -> np.ndarray:
     heatmap = np.exp(-((x_grid - cx) ** 2 + (y_grid - cy) ** 2) / (2 * sigma**2))
     heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
     return heatmap
-
-
-def generate_pure_heatmap(image_rgb: np.ndarray, heatmap: np.ndarray) -> np.ndarray:
-    h, w, _ = image_rgb.shape
-    heatmap_resized = cv2.resize(heatmap, (w, h))
-    heatmap_255 = np.uint8(255 * heatmap_resized)
-    heatmap_color = cv2.applyColorMap(heatmap_255, cv2.COLORMAP_JET)
-    return cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
-
-
-def apply_heatmap_on_image(image_rgb: np.ndarray, heatmap: np.ndarray, alpha: float = 0.6, beta: float = 0.4) -> np.ndarray:
-    heatmap_color_rgb = generate_pure_heatmap(image_rgb, heatmap)
-    return cv2.addWeighted(image_rgb, alpha, heatmap_color_rgb, beta, 0)
-
-
-class GradCAM:
-    def __init__(self, model: torch.nn.Module, target_layer: torch.nn.Module):
-        self.model = model
-        self.target_layer = target_layer
-        self.gradients = None
-        self.activations = None
-        self.heatmap_np = None
-        self.forward_handle = self.target_layer.register_forward_hook(self._save_activation)
-        self.backward_handle = self.target_layer.register_full_backward_hook(self._save_gradient)
-        logger.info("Grad-CAM hooks registered on layer: %s", target_layer.__class__.__name__)
-
-    def cleanup(self) -> None:
-        if getattr(self, "forward_handle", None) is not None:
-            self.forward_handle.remove()
-            self.forward_handle = None
-        if getattr(self, "backward_handle", None) is not None:
-            self.backward_handle.remove()
-            self.backward_handle = None
-
-    def __enter__(self) -> "GradCAM":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.cleanup()
-
-    def _save_activation(self, module, inputs, output):
-        self.activations = output.detach()
-
-    def _save_gradient(self, module, grad_input, grad_output):
-        if grad_output and grad_output[0] is not None:
-            self.gradients = grad_output[0].detach()
-
-    def __call__(self, input_tensor: torch.Tensor, target_class_idx: Optional[int], original_image_rgb: np.ndarray) -> Optional[np.ndarray]:
-        if self.model is None:
-            logger.warning("Grad-CAM: model is not loaded.")
-            return None
-
-        self.model.eval()
-        self.model.zero_grad(set_to_none=True)
-        self.activations = None
-        self.gradients = None
-        self.heatmap_np = None
-
-        try:
-            device = next(self.model.parameters()).device
-            input_tensor = input_tensor.to(device)
-
-            with torch.enable_grad():
-                output = self.model(input_tensor)
-                if target_class_idx is None:
-                    target_class_idx = int(output.argmax(dim=1).item())
-
-                score = output[:, target_class_idx].sum()
-                score.backward()
-
-                if self.activations is None or self.gradients is None:
-                    logger.warning("Grad-CAM: activations or gradients not captured.")
-                    return None
-
-                pooled_gradients = torch.mean(self.gradients, dim=(2, 3))
-                weighted_activations = self.activations * pooled_gradients[:, :, None, None]
-                heatmap = torch.sum(weighted_activations, dim=1).squeeze()
-                heatmap = F.relu(heatmap)
-
-                max_val = torch.max(heatmap)
-                if float(max_val.item()) == 0.0:
-                    heatmap = torch.zeros_like(heatmap)
-                else:
-                    heatmap = heatmap / max_val
-
-                heatmap_np = heatmap.detach().cpu().numpy()
-                self.heatmap_np = heatmap_np
-                return apply_heatmap_on_image(original_image_rgb, heatmap_np)
-
-        except Exception as exc:
-            logger.error("Error generating Grad-CAM: %s", exc)
-            return None
-        finally:
-            self.gradients = None
-            self.activations = None
 
 
 # -------------------------------------------------------------------
@@ -690,17 +602,102 @@ GRAD_CAM_CACHE = {}
 GRAD_CAM_CACHE_LOCK = threading.Lock()
 MAX_CACHE_SIZE = 100
 
-def get_cached_grad_cam(image_hash: str) -> Optional[Tuple[str, str]]:
+def get_cached_grad_cam(image_hash: str) -> Optional[Dict[str, Any]]:
     with GRAD_CAM_CACHE_LOCK:
         return GRAD_CAM_CACHE.get(image_hash)
 
-def set_cached_grad_cam(image_hash: str, overlay_b64: str, heatmap_only_b64: str) -> None:
+def set_cached_grad_cam(
+    image_hash: str,
+    overlay_b64: Optional[str],
+    heatmap_only_b64: Optional[str],
+    overlay_path: Optional[str] = None,
+    heatmap_path: Optional[str] = None,
+    explainability: Optional[Dict[str, Any]] = None,
+) -> None:
     with GRAD_CAM_CACHE_LOCK:
         if len(GRAD_CAM_CACHE) >= MAX_CACHE_SIZE:
             # FIFO eviction
             first_key = next(iter(GRAD_CAM_CACHE))
             GRAD_CAM_CACHE.pop(first_key, None)
-        GRAD_CAM_CACHE[image_hash] = (overlay_b64, heatmap_only_b64)
+        GRAD_CAM_CACHE[image_hash] = {
+            "grad_cam_image_b64": overlay_b64,
+            "heatmap_only_b64": heatmap_only_b64,
+            "heatmap_image_path": overlay_path,
+            "heatmap_only_path": heatmap_path,
+            "explainability": explainability or {
+                "available": bool(overlay_b64 and heatmap_only_b64),
+                "status": "generated" if overlay_b64 and heatmap_only_b64 else "unavailable",
+                "target_layer": "ResNet50 layer4[-1]",
+            },
+        }
+
+
+def build_gradcam_payload(
+    image: np.ndarray,
+    disease: Dict[str, Any],
+    model: Optional[torch.nn.Module],
+) -> Dict[str, Any]:
+    image_hash = hashlib.sha256(image.tobytes()).hexdigest()
+    cached_result = get_cached_grad_cam(image_hash)
+    if cached_result is not None:
+        logger.info("Using cached Grad-CAM heatmap")
+        return cached_result
+
+    payload = {
+        "grad_cam_image_b64": None,
+        "heatmap_only_b64": None,
+        "heatmap_image_path": None,
+        "heatmap_only_path": None,
+        "explainability": {
+            "available": False,
+            "status": "unavailable",
+            "target_layer": "ResNet50 layer4[-1]",
+        },
+    }
+
+    if model is None or disease.get("predicted_class_idx") is None:
+        return payload
+
+    try:
+        input_tensor = preprocess_image_for_resnet(image)
+        gradcam_result = generate_gradcam_explanation(
+            model=model,
+            input_tensor=input_tensor,
+            image_rgb=image,
+            target_class_idx=disease.get("predicted_class_idx"),
+            filename_prefix=image_hash[:16],
+        )
+        payload["explainability"] = {
+            "available": gradcam_result.available,
+            "status": gradcam_result.status,
+            "target_layer": gradcam_result.target_layer,
+        }
+        if gradcam_result.error:
+            payload["explainability"]["error"] = gradcam_result.error
+
+        if gradcam_result.available and gradcam_result.overlay_image is not None and gradcam_result.heatmap_image is not None:
+            payload["grad_cam_image_b64"] = encode_image_for_display(gradcam_result.overlay_image)
+            payload["heatmap_only_b64"] = encode_image_for_display(gradcam_result.heatmap_image)
+            payload["heatmap_image_path"] = gradcam_result.overlay_path
+            payload["heatmap_only_path"] = gradcam_result.heatmap_path
+            set_cached_grad_cam(
+                image_hash,
+                payload["grad_cam_image_b64"],
+                payload["heatmap_only_b64"],
+                payload["heatmap_image_path"],
+                payload["heatmap_only_path"],
+                payload["explainability"],
+            )
+    except Exception as exc:
+        logger.exception("Grad-CAM visualization failed: %s", exc)
+        payload["explainability"] = {
+            "available": False,
+            "status": "failed",
+            "target_layer": "ResNet50 layer4[-1]",
+            "error": str(exc),
+        }
+
+    return payload
 
 
 def analyze_image(image: np.ndarray) -> Dict[str, Any]:
@@ -716,47 +713,15 @@ def analyze_image(image: np.ndarray) -> Dict[str, Any]:
         if not isinstance(disease, dict) or "predicted_class" not in disease or "health_score" not in disease:
             raise ValueError("Invalid disease model prediction output.")
 
-        # Check cache first
-        image_hash = hashlib.sha256(image.tobytes()).hexdigest()
-        cached_result = get_cached_grad_cam(image_hash)
-        
-        grad_cam_image_b64 = None
-        heatmap_only_b64 = None
-        
-        if cached_result is not None:
-            grad_cam_image_b64, heatmap_only_b64 = cached_result
-            logger.info("Using cached Grad-CAM heatmaps")
-        else:
-            if resnet_model is not None and disease.get("predicted_class_idx") is not None:
-                try:
-                    input_tensor = preprocess_image_for_resnet(image)
-                    with GradCAM(resnet_model, resnet_model.layer4[-1]) as grad_cam:
-                        grad_cam_overlay = grad_cam(input_tensor, disease["predicted_class_idx"], image)
-                        heatmap_np = getattr(grad_cam, "heatmap_np", None)
-                    if grad_cam_overlay is not None:
-                        grad_cam_image_b64 = encode_image_for_display(grad_cam_overlay)
-                    if heatmap_np is not None:
-                        pure_heatmap_rgb = generate_pure_heatmap(image, heatmap_np)
-                        heatmap_only_b64 = encode_image_for_display(pure_heatmap_rgb)
-                except Exception as exc:
-                    logger.error("Error generating Grad-CAM: %s", exc)
-
-            if grad_cam_image_b64 is None or heatmap_only_b64 is None:
-                try:
-                    mock_heatmap = generate_mock_heatmap(image)
-                    mock_overlay = apply_heatmap_on_image(image, mock_heatmap)
-                    grad_cam_image_b64 = encode_image_for_display(mock_overlay)
-                    
-                    pure_heatmap_rgb = generate_pure_heatmap(image, mock_heatmap)
-                    heatmap_only_b64 = encode_image_for_display(pure_heatmap_rgb)
-                except Exception as exc:
-                    logger.error("Error generating fallback heatmap: %s", exc)
-            
-            if grad_cam_image_b64 and heatmap_only_b64:
-                set_cached_grad_cam(image_hash, grad_cam_image_b64, heatmap_only_b64)
+        gradcam_payload = build_gradcam_payload(image, disease, resnet_model)
+        grad_cam_image_b64 = gradcam_payload.get("grad_cam_image_b64")
+        heatmap_only_b64 = gradcam_payload.get("heatmap_only_b64")
 
         disease["heatmap_b64"] = grad_cam_image_b64
         disease["heatmap_only_b64"] = heatmap_only_b64
+        disease["heatmap_image_path"] = gradcam_payload.get("heatmap_image_path")
+        disease["heatmap_only_path"] = gradcam_payload.get("heatmap_only_path")
+        disease["explainability"] = gradcam_payload.get("explainability")
 
         recs = generate_recommendations(disease, growth)
         severity = calculate_disease_severity(disease["health_score"])
@@ -770,6 +735,9 @@ def analyze_image(image: np.ndarray) -> Dict[str, Any]:
             "recommendations": recs,
             "grad_cam_image_b64": grad_cam_image_b64,
             "heatmap_only_b64": heatmap_only_b64,
+            "heatmap_image_path": gradcam_payload.get("heatmap_image_path"),
+            "heatmap_only_path": gradcam_payload.get("heatmap_only_path"),
+            "explainability": gradcam_payload.get("explainability"),
             "disease_severity": severity,
             "yield_estimate": yield_est,
             "advanced_recommendations": adv_recs,
@@ -981,6 +949,8 @@ def analyze():
                 weather=weather,
                 grad_cam_image_b64=results.get("grad_cam_image_b64"),
                 heatmap_only_b64=results.get("heatmap_only_b64"),
+                heatmap_image_path=results.get("heatmap_image_path"),
+                heatmap_only_path=results.get("heatmap_only_path"),
                 disease_info=disease_info,
             )
         except Exception as exc:
@@ -1181,6 +1151,8 @@ def demo():
             raw_json=json.dumps(example_json, indent=2),
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             grad_cam_image_b64=grad_cam_image_b64,
+            heatmap_image_path=None,
+            heatmap_only_path=None,
             yield_estimate=yield_est,
             disease_info=disease_info_map.get("Healthy", {}),
             weather=None
@@ -1303,7 +1275,13 @@ def api_analyze():
             results = analyze_image(compressed_rgb)
             if results.get("error"):
                 return jsonify({"error": results["error"]}), 400
-            return jsonify({"status": "success", "timestamp": datetime.now().isoformat(), "results": results}), 200
+            return jsonify({
+                "status": "success",
+                "timestamp": datetime.now().isoformat(),
+                "results": results,
+                "explainability": results.get("explainability"),
+                "heatmap_image_path": results.get("heatmap_image_path"),
+            }), 200
 
         from celery_worker import process_inference_task
         task = process_inference_task.delay(file_bytes.tolist())
@@ -1348,6 +1326,9 @@ def api_explain():
             "image_b64": encode_image_for_display(image_rgb),
             "heatmap_b64": results.get("grad_cam_image_b64"),
             "heatmap_only_b64": results.get("heatmap_only_b64"),
+            "heatmap_image_path": results.get("heatmap_image_path"),
+            "heatmap_only_path": results.get("heatmap_only_path"),
+            "explainability": results.get("explainability"),
             "target_layer": "ResNet50 layer4[-1]",
             "all_confidences": disease.get("all_confidences", {})
         }), 200
@@ -1432,48 +1413,16 @@ def api_analyze_stream():
             return
 
         try:
-            # Generate Grad-CAM heatmaps for stream
-            grad_cam_image_b64 = None
-            heatmap_only_b64 = None
-            
-            image_hash = hashlib.sha256(compressed_rgb.tobytes()).hexdigest()
-            cached_result = get_cached_grad_cam(image_hash)
-            
-            if cached_result is not None:
-                grad_cam_image_b64, heatmap_only_b64 = cached_result
-                logger.info("Using cached Grad-CAM for stream")
-            else:
-                resnet_model, _ = model_manager.load_models()
-                if resnet_model is not None and disease.get("predicted_class_idx") is not None:
-                    try:
-                        input_tensor = preprocess_image_for_resnet(compressed_rgb)
-                        with GradCAM(resnet_model, resnet_model.layer4[-1]) as grad_cam:
-                            grad_cam_overlay = grad_cam(input_tensor, disease["predicted_class_idx"], compressed_rgb)
-                            heatmap_np = getattr(grad_cam, "heatmap_np", None)
-                        if grad_cam_overlay is not None:
-                            grad_cam_image_b64 = encode_image_for_display(grad_cam_overlay)
-                        if heatmap_np is not None:
-                            pure_heatmap_rgb = generate_pure_heatmap(compressed_rgb, heatmap_np)
-                            heatmap_only_b64 = encode_image_for_display(pure_heatmap_rgb)
-                    except Exception as exc:
-                        logger.error("Error generating Grad-CAM for stream: %s", exc)
-
-                if grad_cam_image_b64 is None or heatmap_only_b64 is None:
-                    try:
-                        mock_heatmap = generate_mock_heatmap(compressed_rgb)
-                        mock_overlay = apply_heatmap_on_image(compressed_rgb, mock_heatmap)
-                        grad_cam_image_b64 = encode_image_for_display(mock_overlay)
-                        
-                        pure_heatmap_rgb = generate_pure_heatmap(compressed_rgb, mock_heatmap)
-                        heatmap_only_b64 = encode_image_for_display(pure_heatmap_rgb)
-                    except Exception as exc:
-                        logger.error("Error generating fallback heatmap for stream: %s", exc)
-                
-                if grad_cam_image_b64 and heatmap_only_b64:
-                    set_cached_grad_cam(image_hash, grad_cam_image_b64, heatmap_only_b64)
+            resnet_model, _ = model_manager.load_models()
+            gradcam_payload = build_gradcam_payload(compressed_rgb, disease, resnet_model)
+            grad_cam_image_b64 = gradcam_payload.get("grad_cam_image_b64")
+            heatmap_only_b64 = gradcam_payload.get("heatmap_only_b64")
 
             disease["heatmap_b64"] = grad_cam_image_b64
             disease["heatmap_only_b64"] = heatmap_only_b64
+            disease["heatmap_image_path"] = gradcam_payload.get("heatmap_image_path")
+            disease["heatmap_only_path"] = gradcam_payload.get("heatmap_only_path")
+            disease["explainability"] = gradcam_payload.get("explainability")
 
             results = {
                 "disease": disease,
@@ -1481,6 +1430,9 @@ def api_analyze_stream():
                 "recommendations": generate_recommendations(disease, growth),
                 "grad_cam_image_b64": grad_cam_image_b64,
                 "heatmap_only_b64": heatmap_only_b64,
+                "heatmap_image_path": gradcam_payload.get("heatmap_image_path"),
+                "heatmap_only_path": gradcam_payload.get("heatmap_only_path"),
+                "explainability": gradcam_payload.get("explainability"),
                 "error": None,
             }
             if growth.get("main_class") is None:
@@ -1527,6 +1479,8 @@ def api_analyze_stream():
                 "yield_estimate": yield_estimate,
                 "grad_cam_image_b64": grad_cam_image_b64,
                 "heatmap_only_b64": heatmap_only_b64,
+                "heatmap_image_path": results.get("heatmap_image_path"),
+                "heatmap_only_path": results.get("heatmap_only_path"),
             }
             yield event("complete", 100, "Analysis complete!", data=complete_payload)
         except Exception as exc:
@@ -1570,6 +1524,8 @@ def analyze_result():
             yield_estimate=yield_estimate,
             grad_cam_image_b64=results.get("grad_cam_image_b64"),
             heatmap_only_b64=results.get("heatmap_only_b64"),
+            heatmap_image_path=results.get("heatmap_image_path"),
+            heatmap_only_path=results.get("heatmap_only_path"),
         )
     except Exception as exc:
         logger.error("analyze_result error: %s", exc)

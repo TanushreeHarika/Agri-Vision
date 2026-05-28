@@ -238,6 +238,26 @@
         </ul>
       </div>
 
+      {% if image_b64 and (grad_cam_image_b64 or heatmap_image_path) %}
+      <div class="result-card">
+        <h2 class="results-section-title"><i class="fas fa-brain"></i> Grad-CAM Explainability</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+          <div>
+            <p style="margin: 0 0 0.5rem; color: var(--text-muted); font-weight: 600;">Original Image</p>
+            <img src="data:image/jpeg;base64,{{ image_b64 }}" alt="Original uploaded crop" class="result-img" />
+          </div>
+          <div>
+            <p style="margin: 0 0 0.5rem; color: var(--text-muted); font-weight: 600;">Grad-CAM Heatmap Overlay</p>
+            {% if heatmap_image_path %}
+            <img src="/{{ heatmap_image_path }}" alt="Grad-CAM heatmap overlay" class="result-img" />
+            {% else %}
+            <img src="data:image/jpeg;base64,{{ grad_cam_image_b64 }}" alt="Grad-CAM heatmap overlay" class="result-img" />
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       <div class="agri-leaf-compare-wrap fade-in">
         <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 1.5rem;">
           <div>

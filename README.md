@@ -205,6 +205,9 @@ Model Used - ResNet50
 
 Parameters - 25.6M
 
+### Grad-CAM Explainability
+Successful cotton disease classifications can include a Grad-CAM heatmap overlay generated from the final ResNet50 convolutional block (`layer4[-1]`). Generated visualizations are saved under `static/generated/gradcam/` and surfaced in the results page and API responses when available.
+
 
 # 📊 Model Results
 Check training curves and result snapshots inside the `results/` directory.
