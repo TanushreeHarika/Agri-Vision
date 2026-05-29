@@ -22,8 +22,8 @@
         })();
     </script>
     <script src="{{ url_for('static', filename='js/i18n.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/animations.js') }}" defer></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <script src="{{ url_for('static', filename='js/i18n.js') }}" defer></script>
 </head>
 <body>
     <header>
@@ -51,7 +51,7 @@
         </nav>
         <hr/>
     </header>
-    <main>
+    <main id="swup" class="transition-fade">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             <ul id="alert-list">
@@ -67,5 +67,10 @@
         <hr>
         <p style="font-size:0.95em">Agri-Vision &copy; 2026</p>
     </footer>
+    
+    <!-- Page Transitions Dependencies -->
+    <script src="https://unpkg.com/swup@4"></script>
+    <script src="https://unpkg.com/@swup/progress-plugin@3"></script>
+    <script src="{{ url_for('static', filename='js/page-transitions.js') }}" defer></script>
 </body>
 </html>

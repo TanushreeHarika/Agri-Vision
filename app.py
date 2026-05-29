@@ -2,7 +2,6 @@
 Agri-Vision Flask Application
 Unified inference for disease classification (ResNet50) and growth stage prediction (YOLOv8)
 """
-
 import hashlib
 import logging
 import os
@@ -16,6 +15,31 @@ from typing import Any, Dict, Optional, Tuple
 from collections import defaultdict
 from io import BytesIO
 
+# Load environment file if python-dotenv is available, but don't require it for tests
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:
+    pass
+_flask_env = os.getenv("FLASK_ENV", "production").lower()
+_secret_key = os.getenv("SECRET_KEY")
+_GENERATED_EPHEMERAL_SECRET = False
+if not _secret_key:
+    if _flask_env in ("development", "dev", "testing") or os.getenv(
+        "AGRI_VISION_ALLOW_DEV_SECRET", "false"
+    ).lower() in ("1", "true", "t"):
+        import secrets
+
+        _secret_key = secrets.token_urlsafe(64)
+        _GENERATED_EPHEMERAL_SECRET = True
+    else:
+        raise SystemExit("Missing required SECRET_KEY environment variable")
+
+# Make validated values available for later configuration
+_VALIDATED_SECRET_KEY = _secret_key
+_VALIDATED_FLASK_ENV = _flask_env
+
 import cv2
 import numpy as np
 import torch
@@ -24,7 +48,7 @@ from PIL import Image
 from torchvision import transforms
 from ultralytics import YOLO
 from werkzeug.utils import secure_filename
-from dotenv import load_dotenv
+
 
 from flask import (
     Flask,
@@ -51,6 +75,7 @@ from flask_login import (
     current_user,
 )
 from jinja2 import Environment, FileSystemLoader
+from services.image_quality import safe_validate_image_quality
 
 # redis and rate limiting imports
 import redis
@@ -80,6 +105,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('404.html'), 404
 
 # Try dynamic package loading to prevent crash on automated CI testing rigs
 try:
@@ -149,8 +178,18 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 
-secret_key = os.getenv("SECRET_KEY") or "dev_secret_123"
-app.secret_key = secret_key
+flask_env = _VALIDATED_FLASK_ENV
+app.secret_key = _VALIDATED_SECRET_KEY
+if _GENERATED_EPHEMERAL_SECRET:
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "No SECRET_KEY set — generated ephemeral key for development/testing only. Do NOT use in production."
+    )
+
+cookie_secure_default = flask_env not in ("development", "dev", "testing")
+app.config.setdefault("SESSION_COOKIE_SECURE", cookie_secure_default)
+app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
+app.config.setdefault("SESSION_COOKIE_SAMESITE", os.getenv("SESSION_COOKIE_SAMESITE", "Lax"))
 
 LANG = {
     "en": {"welcome": "Welcome to Agri Vision"},
@@ -684,6 +723,29 @@ def read_uploaded_image(file_storage) -> Tuple[str, np.ndarray, np.ndarray]:
     return safe_filename, image, cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 
+def should_continue_after_quality_warning(validation: Dict[str, Any]) -> bool:
+    return (
+        request.form.get("continue_analysis") == "1"
+        or request.form.get("continue_anyway") == "1"
+        or request.args.get("continue_analysis") == "1"
+    )
+
+
+def add_quality_warning_to_results(
+    results: Dict[str, Any], validation: Dict[str, Any]
+) -> Dict[str, Any]:
+    results["image_quality"] = validation
+    quality_warnings = validation.get("warnings") or []
+    if quality_warnings:
+        existing_warnings = list(results.get("warnings", []))
+        for warning in quality_warnings:
+            message = f"Image quality warning: {warning}"
+            if message not in existing_warnings:
+                existing_warnings.append(message)
+        results["warnings"] = existing_warnings
+    return results
+
+
 GRAD_CAM_CACHE = {}
 GRAD_CAM_CACHE_LOCK = threading.Lock()
 MAX_CACHE_SIZE = 100
@@ -980,12 +1042,17 @@ def build_comparison_result(
 
 
 @app.after_request
-def add_no_cache_headers(response):
+def add_security_headers(response):
+    # Existing cache headers
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+    
+    # --- NEW SECURITY HEADERS ---
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    
     return response
-
 
 @app.route("/")
 def index():
@@ -1026,15 +1093,21 @@ def admin_dashboard():
     if not current_user.is_researcher():
         flash("Access denied. Researchers and Admins only.", "danger")
         return redirect(url_for("index"))
-    return render_template("admin.html")
+    return render_template("admin_dashboard.html")
 
 
 # --- Model Management Admin Endpoints ---
 
 
 @app.route("/admin/models", methods=["GET"])
+@login_required
 def list_models():
     """List all registered models with their metadata"""
+
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     model_type = request.args.get("type")
     try:
         models = registry.list_models(model_type)
@@ -1052,8 +1125,13 @@ def list_models():
 
 
 @app.route("/admin/models/active", methods=["GET"])
+@login_required
 def get_active_models():
     """Get currently active models"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         active_resnet = registry.get_active_model("resnet")
         active_yolo = registry.get_active_model("yolo")
@@ -1072,19 +1150,32 @@ def get_active_models():
 
 
 @app.route("/admin/models/register", methods=["POST"])
+@login_required
 def register_model():
     """Register a new model version"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         data = request.get_json()
         required_fields = ["model_type", "version", "path"]
         for field in required_fields:
             if field not in data:
                 return jsonify({"error": f"Missing required field: {field}"}), 400
+        provided_path = data["path"]
+        models_base = os.path.abspath("models")
+        abs_provided = os.path.abspath(provided_path)
+        if not abs_provided.startswith(models_base + os.sep) and abs_provided != models_base:
+            return (
+                jsonify({"error": "Invalid model path: must be inside the server 'models/' directory."}),
+                400,
+            )
 
         metadata = registry.register_model(
             model_type=data["model_type"],
             version=data["version"],
-            path=data["path"],
+            path=provided_path,
             accuracy=data.get("accuracy", 0.0),
             dataset_version=data.get("dataset_version", "unknown"),
             parameters=data.get("parameters", 0),
@@ -1106,8 +1197,13 @@ def register_model():
 
 
 @app.route("/admin/models/activate", methods=["POST"])
+@login_required
 def activate_model():
     """Set a model version as active"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         data = request.get_json()
         required_fields = ["model_type", "version"]
@@ -1130,8 +1226,13 @@ def activate_model():
 
 
 @app.route("/admin/models/delete", methods=["DELETE"])
+@login_required
 def delete_model():
     """Delete a model version"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         data = request.get_json()
         required_fields = ["model_type", "version"]
@@ -1154,8 +1255,13 @@ def delete_model():
 
 
 @app.route("/admin/models/ab-testing", methods=["POST"])
+@login_required
 def toggle_ab_testing():
     """Enable or disable A/B testing"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         data = request.get_json()
         enabled = data.get("enabled", True)
@@ -1173,8 +1279,13 @@ def toggle_ab_testing():
 
 
 @app.route("/admin/models/ab-ratio", methods=["POST"])
+@login_required
 def set_ab_ratio():
     """Set A/B testing ratio for a model version"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         data = request.get_json()
         required_fields = ["model_type", "version", "ratio"]
@@ -1197,8 +1308,13 @@ def set_ab_ratio():
 
 
 @app.route("/admin/models/metrics", methods=["GET"])
+@login_required
 def get_model_metrics():
     """Get performance metrics for all models"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         models = registry.list_models()
         return jsonify({"status": "success", "metrics": models})
@@ -1208,8 +1324,13 @@ def get_model_metrics():
 
 
 @app.route("/admin/models/rollback-threshold", methods=["POST"])
+@login_required
 def set_rollback_threshold():
     """Set automatic rollback threshold"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         data = request.get_json()
         threshold = data.get("threshold")
@@ -1234,8 +1355,13 @@ def set_rollback_threshold():
 
 
 @app.route("/admin/models/export/pdf", methods=["GET"])
+@login_required
 def export_pdf():
     """Export model metrics as PDF"""
+    if not current_user.is_researcher():
+        logger.warning(f"Unauthorized admin access attempt by user: {getattr(current_user, 'id', None)}")
+        return jsonify({"error": "Access denied. Researchers/Admins only."}), 403
+
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter
@@ -1625,8 +1751,11 @@ def download_analysis_report():
 
 
 @app.route("/history")
+@login_required
 def history():
-    return render_template("history.html")
+    from models import AnalysisHistory
+    records = AnalysisHistory.query.filter_by(user_id=current_user.id).order_by(AnalysisHistory.created_at.desc()).all()
+    return render_template("history.html", history_records=records)
 
 
 @app.route("/health")
@@ -1669,8 +1798,27 @@ def analyze():
 
         try:
             safe_filename, image, image_rgb = read_uploaded_image(file)
+            image_quality, _quality_fallback = safe_validate_image_quality(image)
+            if image_quality.get("is_blocking"):
+                flash(
+                    "Image quality check failed: "
+                    + "; ".join(image_quality.get("warnings", [])),
+                    "error",
+                )
+                return render_template(
+                    "upload.html",
+                    image_quality=image_quality,
+                )
+            if image_quality.get("warnings") and not should_continue_after_quality_warning(image_quality):
+                return render_template(
+                    "upload.html",
+                    image_quality=image_quality,
+                    quality_requires_confirmation=True,
+                )
+
             compressed_rgb = resize_image(image_rgb, MAX_INFERENCE_DIMENSION)
             results = analyze_image(compressed_rgb)
+            add_quality_warning_to_results(results, image_quality)
 
             lat = request.form.get("lat", type=float)
             lon = request.form.get("lon", type=float)
@@ -1692,12 +1840,97 @@ def analyze():
                     + generate_weather_recommendations(weather)
                 )[:6]
                 results["weather"] = weather
+                
+                # Recalculate yield estimate using the fetched weather data
+                if "yield_estimate" in results:
+                    results["yield_estimate"] = estimate_yield(
+                        results["disease"],
+                        results["growth"],
+                        weather=weather,
+                        field_acres=results["yield_estimate"].get("field_acres", 1.0)
+                    )
+
+            # Add forecast data if location provided
+            forecast_data = None
+            if lat and lon and weather:
+                try:
+                    from services.disease_prediction_service import DiseasePredictor, HistoricalPatternAnalyzer
+                    from models import DiseaseOccurrence
+                    
+                    forecast_data = {
+                        'weather': weather,
+                        'location': city or f"{lat:.4f}, {lon:.4f}"
+                    }
+                    
+                    # Get disease prediction based on weather
+                    predictor = DiseasePredictor()
+                    detected_disease = results.get("disease", {}).get("predicted_class", "")
+                    if detected_disease:
+                        # Convert disease name to match database format
+                        disease_name = detected_disease.replace('_', ' ').title()
+                        
+                        # Get weather-based risk
+                        weather_risk = predictor.predict_disease_risk([weather], disease_name)
+                        if weather_risk:
+                            forecast_data['weather_risk'] = weather_risk[0] if weather_risk else None
+                        
+                        # Get historical insights
+                        try:
+                            occurrences = DiseaseOccurrence.query.limit(1000).all()
+                            occurrences_data = [o.to_dict() for o in occurrences]
+                            
+                            analyzer = HistoricalPatternAnalyzer()
+                            analyzer.train(occurrences_data)
+                            
+                            # Get peak season for detected disease
+                            peak_season = analyzer.get_peak_season(disease_name)
+                            if peak_season:
+                                forecast_data['peak_season'] = peak_season
+                            
+                            # Get current month risk
+                            current_month = datetime.now().month
+                            seasonal_patterns = analyzer.seasonal_patterns
+                            if disease_name in seasonal_patterns:
+                                monthly_risk = seasonal_patterns[disease_name].get(current_month, 0)
+                                forecast_data['seasonal_risk'] = {
+                                    'month': current_month,
+                                    'month_name': datetime(2024, current_month, 1).strftime('%B'),
+                                    'risk_percentage': monthly_risk
+                                }
+                            
+                            # Get weather recommendations
+                            if weather_risk and weather_risk[0]:
+                                risk_level = weather_risk[0].get('risk_level', 'moderate')
+                                recommendations = predictor.generate_recommendations(disease_name, risk_level)
+                                forecast_data['recommendations'] = recommendations
+                        except Exception as e:
+                            logger.warning(f"Could not get historical insights: {e}")
+                except Exception as e:
+                    logger.warning(f"Could not fetch forecast data: {e}")
 
             if results.get("error"):
                 raise ValueError(results["error"])
 
             predicted_class = results.get("disease", {}).get("predicted_class", "")
             disease_info = disease_info_map.get(predicted_class, {})
+
+            from models import AnalysisHistory, db
+            if current_user.is_authenticated:
+                import time
+                unique_filename = f"{int(time.time())}_{safe_filename}"
+                file_path = os.path.join("static", "uploads", unique_filename)
+                cv2.imwrite(file_path, image)
+                
+                history_entry = AnalysisHistory(
+                    user_id=current_user.id,
+                    image_path=unique_filename,
+                    disease_result=results.get("disease"),
+                    growth_result=results.get("growth"),
+                    confidence=results.get("disease", {}).get("confidence"),
+                    health_score=results.get("disease", {}).get("health_score")
+                )
+                db.session.add(history_entry)
+                db.session.commit()
 
             return render_template(
                 "results.html",
@@ -1708,6 +1941,7 @@ def analyze():
                 raw_json=json.dumps(results, indent=2),
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 weather=weather,
+                forecast=forecast_data,
                 grad_cam_image_b64=results.get("grad_cam_image_b64"),
                 heatmap_only_b64=results.get("heatmap_only_b64"),
                 heatmap_image_path=results.get("heatmap_image_path"),
@@ -1745,9 +1979,22 @@ def api_explain():
 
     try:
         _, image, image_rgb = read_uploaded_image(file)
+        image_quality, _quality_fallback = safe_validate_image_quality(image)
+        if image_quality.get("is_blocking"):
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "error": "Image quality check failed.",
+                        "image_quality": image_quality,
+                    }
+                ),
+                400,
+            )
         compressed_rgb = resize_image(image_rgb, MAX_INFERENCE_DIMENSION)
 
         results = analyze_image(compressed_rgb)
+        add_quality_warning_to_results(results, image_quality)
 
         if "error" in results:
             return jsonify({"status": "error", "error": results["error"]}), 500
@@ -1763,6 +2010,7 @@ def api_explain():
                 "image_b64": encode_image_for_display(compressed_rgb),
                 "predicted_class": disease_result.get("predicted_class", "Unknown"),
                 "confidence": disease_result.get("confidence", 0.0),
+                "image_quality": image_quality,
             }
         )
     except Exception as exc:
@@ -2121,13 +2369,27 @@ def api_analyze():
         if image is None:
             return jsonify({"error": "Invalid image file"}), 400
 
+        image_quality, _quality_fallback = safe_validate_image_quality(image)
+        if image_quality.get("is_blocking"):
+            return (
+                jsonify(
+                    {
+                        "error": "Image quality check failed.",
+                        "image_quality": image_quality,
+                    }
+                ),
+                400,
+            )
+
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         results = analyze_image(image_rgb)
+        add_quality_warning_to_results(results, image_quality)
 
         resp_data = {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
             "results": results,
+            "image_quality": image_quality,
         }
         resp_json = json.dumps(resp_data)
 
@@ -2185,6 +2447,39 @@ def api_analyze_stream():
         except Exception as e:
             logger.error(f"Streaming analysis error: {e}")
             yield f"data: {json.dumps({'status': 'error', 'message': 'Analysis is taking longer than expected. Please try again after some time.'})}\n\n" 
+    def generate():
+        try:
+            yield f"data: {json.dumps({'status': 'uploading', 'step': 'upload_received', 'progress': 25, 'message': 'Upload received.'})}\n\n"
+
+            file_bytes = np.frombuffer(file.read(), np.uint8)
+            image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            if image is None:
+                yield f"data: {json.dumps({'status': 'error', 'step': 'error', 'message': 'Invalid image file'})}\n\n"
+                return
+
+            image_quality, _quality_fallback = safe_validate_image_quality(image)
+            if image_quality.get("is_blocking"):
+                yield f"data: {json.dumps({'status': 'error', 'step': 'error', 'message': 'Image quality check failed.', 'image_quality': image_quality})}\n\n"
+                return
+            if image_quality.get("warnings") and not should_continue_after_quality_warning(image_quality):
+                yield f"data: {json.dumps({'status': 'quality_warning', 'step': 'quality_warning', 'progress': 35, 'message': 'Image quality warnings found.', 'image_quality': image_quality})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'status': 'analyzing', 'step': 'preprocessing', 'progress': 50, 'message': 'Validating and preparing image.'})}\n\n"
+
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            compressed_rgb = resize_image(image_rgb, MAX_INFERENCE_DIMENSION)
+            results = analyze_image(compressed_rgb)
+            add_quality_warning_to_results(results, image_quality)
+            if results.get("error"):
+                yield f"data: {json.dumps({'status': 'error', 'step': 'error', 'message': results['error']})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'status': 'generating', 'step': 'recommendations', 'progress': 75, 'message': 'Generating recommendations.'})}\n\n"
+            yield f"data: {json.dumps({'status': 'complete', 'step': 'complete', 'progress': 100, 'message': 'Analysis complete.', 'results': results, 'data': {'results': results, 'image_quality': image_quality}})}\n\n"
+        except Exception as e:
+            logger.error(f"Streaming analysis error: {e}")
+            yield f"data: {json.dumps({'status': 'error', 'step': 'error', 'message': str(e)})}\n\n"
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
@@ -2215,56 +2510,66 @@ def api_batch_upload():
         db.session.add(job)
         db.session.commit()
 
+        import base64
         images_data = []
         for file in valid_files:
             file_data = file.read()
-            images_data.append((file.filename, file_data))
+            b64_data = base64.b64encode(file_data).decode('utf-8')
+            images_data.append((file.filename, b64_data))
 
-        import cv2
-        import numpy as np
+        celery_enabled = False
+        try:
+            from celery_tasks import process_batch_job, CELERY_AVAILABLE
+            if CELERY_AVAILABLE:
+                process_batch_job.delay(job.id, images_data)
+                celery_enabled = True
+        except ImportError:
+            pass
 
-        for idx, (filename, image_data) in enumerate(images_data):
-            try:
-                file_bytes = np.frombuffer(image_data, np.uint8)
-                image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                if image is not None:
-                    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    results = analyze_image(image_rgb)
-
+        if not celery_enabled:
+            import cv2
+            import numpy as np
+            for idx, (filename, b64_data) in enumerate(images_data):
+                try:
+                    file_bytes = np.frombuffer(base64.b64decode(b64_data), np.uint8)
+                    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                    if image is not None:
+                        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                        results = analyze_image(image_rgb)
+                        result = AnalysisResult(
+                            batch_job_id=job.id,
+                            image_name=filename,
+                            image_index=idx,
+                            status="complete",
+                            disease_class=results.get("disease", {}).get("predicted_class"),
+                            disease_confidence=results.get("disease", {}).get("confidence"),
+                            health_score=results.get("disease", {}).get("health_score"),
+                            growth_class=results.get("growth", {}).get("main_class"),
+                            growth_confidence=results.get("growth", {}).get("confidence"),
+                            results_json=results,
+                        )
+                        db.session.add(result)
+                except Exception as e:
+                    logger.error(f"Error processing image {filename}: {e}")
                     result = AnalysisResult(
                         batch_job_id=job.id,
                         image_name=filename,
                         image_index=idx,
-                        status="complete",
-                        disease_class=results.get("disease", {}).get("predicted_class"),
-                        disease_confidence=results.get("disease", {}).get("confidence"),
-                        health_score=results.get("disease", {}).get("health_score"),
-                        growth_class=results.get("growth", {}).get("main_class"),
-                        growth_confidence=results.get("growth", {}).get("confidence"),
-                        results_json=results,
+                        status="error",
+                        error_message=str(e),
                     )
                     db.session.add(result)
-            except Exception as e:
-                logger.error(f"Error processing image {filename}: {e}")
-                result = AnalysisResult(
-                    batch_job_id=job.id,
-                    image_name=filename,
-                    image_index=idx,
-                    status="error",
-                    error_message=str(e),
-                )
-                db.session.add(result)
-
-        job.status = "completed"
-        job.completed_at = datetime.utcnow()
-        db.session.commit()
+            
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
 
         return jsonify(
             {
                 "status": "success",
                 "job_id": job.id,
                 "total_images": len(valid_files),
-                "celery_enabled": False,
+                "celery_enabled": celery_enabled,
                 "message": f"Batch job {job.id} started with {len(valid_files)} images",
             }
         )

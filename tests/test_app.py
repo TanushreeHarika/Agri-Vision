@@ -17,6 +17,7 @@ import app
 @pytest.fixture(scope="session")
 def app_with_db():
     app.app.config["TESTING"] = True
+    app.app.config["LOGIN_DISABLED"] = True
     app.app.config["UPLOAD_FOLDER"] = "./static/uploads"
     app.app.config["SECRET_KEY"] = "test-secret"
     app.app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
