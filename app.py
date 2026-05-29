@@ -282,7 +282,7 @@ disease_info_map = {
 }
 
 UNCERTAINTY_THRESHOLD = 0.45
-AMBIGUITY_MARGIN = 0.08
+AMBIGUITY_MARGIN = 0.08  
 
 
 class ModelManager:
@@ -316,17 +316,11 @@ class ModelManager:
 
             if self.resnet_model is None:
                 try:
-                    try:
-                        self.resnet_model = torch.load(
-                            RESNET_MODEL_PATH,
-                            map_location=torch.device("cpu"),
-                        )
-                    except TypeError:
-                        self.resnet_model = torch.load(
-                            RESNET_MODEL_PATH,
-                            map_location=torch.device("cpu"),
-                            weights_only=False,
-                        )
+                    self.resnet_model = torch.load(
+                        RESNET_MODEL_PATH,
+                        map_location=torch.device("cpu"),
+                        weights_only=True,
+                    )
                     self.resnet_model.eval()
                     self.errors["resnet"] = None
                     logger.info("ResNet50 loaded")
@@ -365,18 +359,8 @@ class ModelManager:
 
 model_manager = ModelManager()
 
-resnet_model = None
-yolo_model = None
-
-
-def load_models():
-    global resnet_model, yolo_model
-    resnet_model, yolo_model = model_manager.load_models()
-    return resnet_model, yolo_model
-
-
 def ensure_models_loaded() -> None:
-    load_models()
+    model_manager.load_models()
 
 
 def _ensure_rgb(image: np.ndarray) -> np.ndarray:
@@ -1866,9 +1850,10 @@ def analyze():
                     predictor = DiseasePredictor()
                     detected_disease = results.get("disease", {}).get("predicted_class", "")
                     if detected_disease:
-                        # Convert disease name to match database format
-                        disease_name = detected_disease.replace('_', ' ').title()
-                        
+                        # Disease name is automatically normalized by DiseasePredictor
+                        # via DISEASE_DISPLAY_TO_KEY mapping, so we pass it directly
+                        disease_name = detected_disease
+
                         # Get weather-based risk
                         weather_risk = predictor.predict_disease_risk([weather], disease_name)
                         if weather_risk:
@@ -2415,6 +2400,38 @@ def api_analyze_stream():
     if file.filename == "":
         return jsonify({"error": "No file selected"}), 400
 
+    def generate():
+        try:
+            yield f"data: {json.dumps({'status': 'uploading', 'progress': 25})}\n\n"
+
+            file_bytes = np.frombuffer(file.read(), np.uint8)
+            image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            if image is None:
+                yield f"data: {json.dumps({'status': 'error', 'message': 'Unable to process this image. Please upload a clear crop photo and try again.'})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'status': 'analyzing', 'progress': 50})}\n\n"
+
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            compressed_rgb = resize_image(image_rgb, MAX_INFERENCE_DIMENSION)
+            yield f"data: {json.dumps({'step': 'upload_received', 'progress': 20, 'message': 'Image received, starting analysis...'})}\n\n"
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(analyze_image, compressed_rgb)
+                try:
+                    results = future.result(timeout=60)
+                except concurrent.futures.TimeoutError:
+                    yield f"data: {json.dumps({'step': 'error', 'progress': 100, 'message': 'The request exceeded the expected processing time. Please try again later.'})}\n\n"
+                    return
+            if results.get("error"):
+                yield f"data: {json.dumps({'status': 'error', 'message': results['error']})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'status': 'generating', 'progress': 75})}\n\n"
+            yield f"data: {json.dumps({'status': 'complete', 'progress': 100, 'results': results})}\n\n"
+        except Exception as e:
+            logger.error(f"Streaming analysis error: {e}")
+            yield f"data: {json.dumps({'status': 'error', 'message': 'Analysis is taking longer than expected. Please try again after some time.'})}\n\n" 
     def generate():
         try:
             yield f"data: {json.dumps({'status': 'uploading', 'step': 'upload_received', 'progress': 25, 'message': 'Upload received.'})}\n\n"

@@ -313,26 +313,112 @@ F1 Score - 100%
 ```tree
 Agri-Vision/
 │
-├── results/                        # Stores output results and visualizations
-│   └── training_history.png
+├── app/
+│   ├── __init__.py
+│   │
+│   ├── routes/
+│   │   ├── auth.py
+│   │   ├── admin.py
+│   │   ├── dashboard.py
+│   │   ├── disease.py
+│   │   ├── reports.py
+│   │   ├── weather.py
+│   │   └── yield_prediction.py
+│   │
+│   ├── services/
+│   │   ├── disease_prediction_service.py
+│   │   ├── recommendation_engine.py
+│   │   ├── report_service.py
+│   │   ├── weather_service.py
+│   │   ├── yield_service.py
+│   │   ├── image_quality.py
+│   │   └── gradcam.py
+│   │
+│   ├── database/
+│   │   └── models.py
+│   │
+│   ├── templates/
+│   └── static/
 │
-├── static/                         # Static assets
-│   ├── css/
-│   ├── uploads/
-│   └── favicon.png
+├── ai_models/
+│   ├── cotton/
+│   ├── potato/
+│   ├── tomato/
+│   └── growth_stage/
 │
-├── templates/                      # Flask HTML templates
-│   ├── index.html
-│   ├── results.html
-│   └── upload.html
+├── training/
+│   ├── notebooks/
+│   │   ├── cotton_crop_disease_prediction.ipynb
+│   │   ├── potato_crop_disease_classification.ipynb
+│   │   ├── tomato_crop_disease_classification.ipynb
+│   │   ├── tomato_growth_stages_classification.ipynb
+│   │   └── cotton_growth_stage_prediction.ipynb
+│   │
+│   ├── train.py
+│   ├── model_config.json
+│   └── model_registry.py
 │
-├── .env                            # Environment variables (create manually)
-├── .gitignore
-├── app.py                          # Main Flask application
-├── LICENSE
-├── README.md
+├── database/
+│   ├── create_admin.py
+│   ├── add_sample_data.py
+│   ├── populate_disease_data.py
+│   └── populate_historical_data.py
+│
+├── tasks/
+│   ├── celery_tasks.py
+│   └── celery_worker.py
+│
+├── results/
+│   ├── cotton/
+│   ├── potato/
+│   ├── tomato/
+│   └── growth_stage/
+│
+├── docs/
+│   ├── architecture.md
+│   ├── MODEL_VERSIONING.md
+│   ├── PDF_FEATURE_INTEGRATION.md
+│   ├── PDF_IMPLEMENTATION_SUMMARY.md
+│   ├── PDF_QUICK_START.md
+│   ├── security.md
+│   ├── model-benchmarking.md
+│   └── api-documentation.md
+│
+├── deployment/
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── nginx.conf
+│   └── runtime.txt
+│
+├── tools/
+│   ├── check_quotes.py
+│   ├── check_tags.py
+│   ├── count_brackets.py
+│   └── find_unmatched.py
+│
+├── tests/
+│   ├── test_admin_auth.py
+│   ├── test_app.py
+│   ├── test_config.py
+│   ├── test_explain.py
+│   ├── test_recommendations.py
+│   ├── test_weather.py
+│   └── test_yield.py
+│
+├── client/
+├── .github/
+│
+├── run.py
 ├── requirements.txt
-└── train.py                        # Model training script
+├── requirements_minimal.txt
+├── requirements_no_versions.txt
+├── README.md
+├── LICENSE
+├── CONTRIBUTING.md
+├── Code_Of_Conduct.md
+├── .env.example
+├── .gitignore
+└── pytest.ini
 ```
 
 ---

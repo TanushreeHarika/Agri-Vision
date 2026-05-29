@@ -298,7 +298,7 @@
             "></div>
                         </div>
                         <!-- AI Confidence & Crop Health Meter -->
-                        <div class="ai-health-dashboard">
+                        <div class="ai-health-dashboard" id="ai-health-dashboard" style="display:none;">
 
                             <!-- AI Confidence -->
                             <div class="ai-meter-card">
@@ -361,6 +361,19 @@
                                 complete</div>
                         </div>
 
+                        <p id="estimated-wait-msg" style="display:none; color:rgba(255,255,255,0.72); font-size:0.88rem; margin-top:8px; text-align:center;">
+                            This usually takes 20–30 seconds.
+                        </p>
+
+                        <p id="timeout-warning" style="display:none; color:#ff6b6b; font-size:0.88rem; margin-top:8px; text-align:center;">
+                            ⚠️ Taking longer than expected — please retry.
+                        </p>
+
+
+                        <button id="cancel-analysis-btn" onclick="cancelAnalysis()" style="display:none; margin-top:12px; width:100%; padding:10px; background:#c0392b; color:#fff; border:none; border-radius:10px; font-size:0.95rem; font-weight:600; cursor:pointer;">
+                            ✕ Cancel Analysis
+                        </button>
+
                         <!-- Current status message -->
                         <p id="streamStatusMsg" style="
                         margin: 1rem 0 0; font-size:0.82rem;
@@ -384,10 +397,20 @@
                     .stream-step.active {
                         color: #ffffff;
                         font-weight: 600;
+                        background: rgba(128, 255, 178, 0.08);
+                        border-radius: 8px;
+                        padding: 0.4rem 0.75rem;
+                        animation: stepPulse 1.2s ease-in-out infinite;
                     }
 
                     .stream-step.error-step {
                         color: #ff6b6b;
+                    }
+
+                    @keyframes stepPulse {
+                        0% { background: rgba(128, 255, 178, 0.05); }
+                        50% { background: rgba(128, 255, 178, 0.18); }
+                        100% { background: rgba(128, 255, 178, 0.05); }
                     }
                 </style>
             </form>
@@ -921,8 +944,45 @@
         }
     });
 
-
+    let elapsedTimer = null;
     let isAnalyzing = false;
+
+    let analysisAbortController = null;
+
+    function cancelAnalysis() {
+        clearInterval(elapsedTimer);
+        const timeoutWarning = document.getElementById('timeout-warning');
+        if (timeoutWarning) timeoutWarning.style.display = 'none';
+
+        const cancelBtn = document.getElementById('cancel-analysis-btn');
+        if (cancelBtn) cancelBtn.style.display = 'none';
+
+        isAnalyzing = false;
+
+        // Cancel the in-flight request
+        try {
+            if (analysisAbortController) {
+                analysisAbortController.abort();
+            }
+        } catch (e) {
+            // ignore
+        }
+
+        const submitBtn = document.querySelector('.action-btn');
+        const panel = document.getElementById('streamProgressPanel');
+        if (submitBtn) {
+            submitBtn.style.display = '';
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fas fa-magnifying-glass"></i> Start AI Analysis';
+        }
+        if (panel) panel.style.display = 'none';
+
+        const estMsg = document.getElementById('estimated-wait-msg');
+        if (estMsg) estMsg.style.display = 'none';
+
+        // Do NOT hard refresh; user can retry immediately.
+    }
+
 
     document.querySelector('form').addEventListener('submit', async function (event) {
         event.preventDefault();   // stop normal form submission
@@ -942,12 +1002,104 @@
             alert('Please select a crop image first.');
             return;
         }
+        /*
+        const reader  = response.body.getReader();
+        const decoder = new TextDecoder();
+        let   buffer  = '';
+ 
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+ 
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();   // keep incomplete last line
+ 
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let parsed;
+                try {
+                    parsed = JSON.parse(line.slice(6));
+                } catch {
+                    continue;
+                }
+ 
+                const { step, status, progress, message, data, results } = parsed;
+ 
+                // Update progress bar
+                progressBar.style.width = progress + '%';
+                statusMsg.textContent = message;
+ 
+                if (step === 'error') {
+                    // Mark active steps as error-step
+                    steps.forEach(s => {
+                        const el = document.getElementById('step-' + s);
+                        if (el && el.classList.contains('active')) {
+                            el.className = 'stream-step error-step';
+                            el.textContent = '❌ ' + el.dataset.label;
+                        }
+                    });
+                    statusMsg.textContent = '❌ ' + message;
+                    statusMsg.style.color = '#ff6b6b';
+                    progressBar.style.background = '#ff6b6b';
+                    
+                    const previewContainer = document.getElementById('previewContainer');
+                    const preview = document.getElementById('imagePreview');
+
+                    if (previewContainer && preview && preview.src) {
+                        previewContainer.style.display = 'block';
+                        preview.style.display = 'block';
+                    }
+                    isAnalyzing = false;
+                    submitBtn.style.display = '';
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-magnifying-glass"></i> Try Again';
+                    return;
+                }
+ 
+                // Map backend step to our frontend 4 UI steps:
+                // upload: upload_received
+                // analyze: preprocessing, growth_inference, disease_inference
+                // predict: recommendations
+                // complete: complete
+                let uiStep = '';
+                if (step === 'upload_received') {
+                    uiStep = 'upload';
+                } else if (step === 'preprocessing' || step === 'growth_inference' || step === 'disease_inference') {
+                    uiStep = 'analyze';
+                } else if (step === 'recommendations') {
+                    uiStep = 'predict';
+                } else if (step === 'complete') {
+                    uiStep = 'complete';
+                }
+            }
+        }
+        */
  
         // (removed stray reader block)
 
         isAnalyzing = true;
+
+        // ---- Estimated wait time (field-friendly) ----
+        const estMsg = document.getElementById('estimated-wait-msg');
+        if (estMsg) {
+            estMsg.textContent = 'This usually takes 20–30 seconds (depending on network and image quality).';
+            estMsg.style.display = 'block';
+        }
+
+        let elapsedSeconds = 0;
+        clearInterval(elapsedTimer);
+        elapsedTimer = setInterval(() => {
+            elapsedSeconds++;
+            if (elapsedSeconds === 40) {
+                document.getElementById('timeout-warning').style.display = 'block';
+                document.getElementById('cancel-analysis-btn').style.display = 'block';
+            }
+        }, 1000);
+
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i data-lucide="loader-2" class="lucide-spin -spin"></i> Analyzing...';
+
 
         // Show progress panel, hide submit button (or disable it during progress)
         panel.style.display = 'block';
@@ -967,18 +1119,25 @@
         statusMsg.textContent = '';
         statusMsg.style.color = '';
         progressBar.style.background = '';
+        const dashboard = document.getElementById('ai-health-dashboard');
+        if (dashboard) dashboard.style.display = 'none';
 
         // Build FormData from the form
         const formData = new FormData(form);
 
         // Store results payload for redirect
         let finalPayload = null;
+        let highestStepIndex = -1;
 
         try {
+            analysisAbortController = new AbortController();
+
             const response = await fetch('/api/analyze_stream', {
                 method: 'POST',
                 body: formData,
+                signal: analysisAbortController.signal,
             });
+
 
             if (!response.ok) {
                 throw new Error(`Server error: ${response.status}`);
@@ -1005,7 +1164,10 @@
                         continue;
                     }
 
-                    const { step, progress, message, data } = parsed;
+                    const step = parsed.step || parsed.status;
+                    const progress = parsed.progress || 0;
+                    const message = parsed.message || '';
+                    const data = parsed.data || parsed.results;
 
                     // Update progress bar
                     progressBar.style.width = progress + '%';
@@ -1035,7 +1197,7 @@
                                 el.textContent = '❌ ' + el.dataset.label;
                             }
                         });
-                        statusMsg.textContent = '❌ ' + message;
+                        statusMsg.textContent = '❌ Analysis could not be completed. Please try again after some time.';
                         statusMsg.style.color = '#ff6b6b';
                         progressBar.style.background = '#ff6b6b';
 
@@ -1052,18 +1214,19 @@
                     // predict: recommendations
                     // complete: complete
                     let uiStep = '';
-                    if (step === 'upload_received') {
+                    if (step === 'upload_received' || step === 'uploading') {
                         uiStep = 'upload';
-                    } else if (step === 'preprocessing' || step === 'growth_inference' || step === 'disease_inference') {
+                    } else if (step === 'preprocessing' || step === 'growth_inference' || step === 'disease_inference' || step === 'analyzing') {
                         uiStep = 'analyze';
-                    } else if (step === 'recommendations') {
+                    } else if (step === 'recommendations' || step === 'generating') {
                         uiStep = 'predict';
                     } else if (step === 'complete') {
                         uiStep = 'complete';
                     }
 
                     if (uiStep) {
-                        const currentIndex = steps.indexOf(uiStep);
+                        highestStepIndex = Math.max(highestStepIndex, steps.indexOf(uiStep));
+                        const currentIndex = highestStepIndex;
                         steps.forEach((s, idx) => {
                             const el = document.getElementById('step-' + s);
                             if (el) {
@@ -1080,10 +1243,12 @@
                             }
                         });
                     }
+                    const status = parsed.status;
+
 
                     // On complete — store payload and redirect via hidden form
-                    if (step === 'complete' && data) {
-                        finalPayload = data;
+                    if (status === 'complete' || (step === 'complete' && data)) {
+                    const finalData = results || data;
 
                         // Mark complete step as done
                         const completeEl = document.getElementById('step-complete');
@@ -1091,6 +1256,12 @@
                             completeEl.className = 'stream-step done';
                             completeEl.textContent = '✅ ' + completeEl.dataset.label;
                         }
+                        const dashboard = document.getElementById('ai-health-dashboard');
+                        if (dashboard) dashboard.style.display = 'grid';
+
+                        const realConfidence = Math.round((finalPayload?.disease?.confidence || 0) * 100);
+                        const realHealth = Math.round(finalPayload?.disease?.health_score || 0);
+                        updateAIMetrics(realConfidence, realHealth);
 
                         statusMsg.textContent = '✅ Done! Loading results...';
 
@@ -1098,27 +1269,25 @@
                         await new Promise(r => setTimeout(r, 600));
 
                         // POST the results to /analyze_result for rendering
-                        const resultForm = document.createElement('form');
-                        resultForm.method = 'POST';
-                        resultForm.action = '/analyze_result';
-                        resultForm.style.display = 'none';
-
-                        const input = document.createElement('input');
-                        input.type = 'hidden';
-                        input.name = 'payload';
-                        input.value = JSON.stringify(finalPayload);
-                        resultForm.appendChild(input);
-
-                        document.body.appendChild(resultForm);
-                        resultForm.submit();
+                        window.location.href = '/dashboard';
                     }
                 }
             }
 
         } catch (err) {
-            statusMsg.textContent = '❌ Connection error: ' + err.message;
-            statusMsg.style.color = '#ff6b6b';
-            progressBar.style.background = '#ff6b6b';
+            clearInterval(elapsedTimer);
+
+            // If user clicked Cancel, don't show a scary network error.
+            if (err && err.name === 'AbortError') {
+                statusMsg.textContent = 'Analysis canceled. You can upload and try again.';
+                statusMsg.style.color = 'rgba(255,255,255,0.7)';
+                progressBar.style.background = '';
+            } else {
+                statusMsg.textContent = '❌ Analysis is taking longer than expected. Please try again after some time.';
+                statusMsg.style.color = '#ff6b6b';
+                progressBar.style.background = '#ff6b6b';
+            }
+
 
             steps.forEach(s => {
                 const el = document.getElementById('step-' + s);
@@ -1133,6 +1302,7 @@
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<i data-lucide="search"></i> Try Again';
         } finally {
+            clearInterval(elapsedTimer);
             // Reset analyzing state if we didn't redirect
             if (!finalPayload) {
                 isAnalyzing = false;
@@ -1169,20 +1339,6 @@
         healthFill.style.width = health + '%';
         healthValue.textContent = health + '%';
     }
-
-    /* Simulate AI updates during analysis */
-
-    setTimeout(() => {
-        updateAIMetrics(72, 65);
-    }, 1200);
-
-    setTimeout(() => {
-        updateAIMetrics(84, 78);
-    }, 2500);
-
-    setTimeout(() => {
-        updateAIMetrics(94, 86);
-    }, 4000);
 
 </script>
 
