@@ -16,72 +16,79 @@
         }
         
         /* Navigation Styles */
-        .navbar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 0 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            align-items: center;
-            padding: 15px 0;
-            gap: 20px;
-        }
-        
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: white;
-            text-decoration: none;
-            font-size: 20px;
-            font-weight: 600;
-        }
-        
-        .logo i {
-            font-size: 24px;
-        }
-        
-        .nav-menu {
-            display: flex;
-            list-style: none;
-            margin: 0;
-            padding: 0;
-            gap: 5px;
-            align-items: center;
-            flex: 1;
-            overflow-x: auto;
-            scrollbar-width: none;
-        }
-        
-        .nav-menu::-webkit-scrollbar {
-            display: none;
-        }
-        
-        .nav-menu li {
-            position: relative;
-        }
-        
-        .nav-menu a {
-            color: white;
-            text-decoration: none;
-            padding: 8px 10px;
-            border-radius: 5px;
-            font-size: 13px;
-            transition: background 0.3s;
-            white-space: nowrap;
-        }
-        
-        .nav-menu a:hover,
-        .nav-menu a.active {
-            background: rgba(255,255,255,0.2);
-        }
+        /* Centered dashboard navbar */
+/* Dashboard Navbar */
+/* Navigation Styles */
+/* Dashboard Navbar */
+/* Dashboard Navbar */
+.navbar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 10px 20px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    border-radius: 12px;
+    left: auto !important;
+    transform: none !important;
+}
+
+.container {
+    display: flex;
+    flex-wrap: wrap;        /* allows two lines */
+    justify-content: center; /* centers everything */
+    align-items: center;
+    gap: 40px;
+    max-width: 1400px;
+    width: 100%;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.nav-menu {
+    display: flex;
+    flex-wrap: wrap;        /* wrap long items to next row */
+    justify-content: center;
+    gap: 43px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.nav-menu li {
+    display: flex;
+}
+
+.nav-menu a {
+    text-align: center;
+    color: white;
+    text-decoration: none;
+    padding: 6px 8px;
+    font-size: 12px;
+    line-height: 1.2;
+    border-radius: 5px;
+    white-space: normal;  /* allows wrapping */
+    transition: background 0.3s;
+}
+
+.nav-menu a:hover,
+.nav-menu a.active {
+    background: rgba(255,255,255,0.2);
+}
+
+.logo {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    margin-right: 20px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
         
         .nav-menu .dropdown {
             position: relative;
@@ -385,12 +392,12 @@
                 {% if current_user.is_authenticated %}
                     <li><a href="/analyze">Analyze</a></li>
                     <li><a href="/batch">Batch</a></li>
-                    <li><a href="/disease-map">Disease Map</a></li>
+                    <li><a href="/disease-map">Disease<br>Map</a></li>
                     <li><a href="/dashboard" class="active">Dashboard</a></li>
                     <li><a href="/reports">Reports</a></li>
-                    <li><a href="/disease-database">Disease DB</a></li>
-                    <li><a href="/symptom-checker">Symptom Checker</a></li>
-                    <li><a href="/disease-forecast">Disease Forecast</a></li>
+                    <li><a href="/disease-database">Disease<br>DB</a></li>
+                    <li><a href="/symptom-checker">Symptom<br>Checker</a></li>
+                    <li><a href="/disease-forecast">Disease<br>Forecast</a></li>
                     <li><a href="/history">History</a></li>
                     <li><a href="/profile">Profile</a></li>
                     {% if current_user.is_researcher() %}
