@@ -2879,6 +2879,16 @@ if __name__ == '__main__':
         db.create_all()
         logger.info("Database tables created")
 
+        # Seed enterprise RBAC (idempotent)
+        try:
+            from auth.rbac_seed import seed_rbac_permissions_and_roles
+
+            seed_rbac_permissions_and_roles()
+            logger.info("RBAC seed completed")
+        except Exception as exc:
+            logger.warning(f"RBAC seed skipped/failed: {exc}")
+
+
     ensure_models_loaded()
     
     # Register models in the registry
