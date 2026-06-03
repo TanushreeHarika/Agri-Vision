@@ -94,6 +94,17 @@ def load_user(user_id):
     from models import User
     return User.query.get(user_id)
 
+from functools import wraps
+
+def api_login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            from flask import jsonify
+            return jsonify({"status": "error", "error": "Authentication required"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
 # --- Security Configuration ---
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # Increased to 50MB for batch uploads
@@ -1321,6 +1332,7 @@ def analyze():
 
 
 @app.route("/api/explain", methods=["POST"])
+@api_login_required
 def api_explain():
     if "file" not in request.files:
         return jsonify({"status": "error", "error": "No file uploaded"}), 400
@@ -1359,6 +1371,7 @@ def api_explain():
 
 
 @app.route("/comparison", methods=["GET", "POST"])
+@login_required
 def comparison():
     error_message = None
     old_filename, new_filename, old_image, new_image = None, None, None, None
@@ -1650,6 +1663,7 @@ def api_weather():
 
 
 @app.route("/api/analyze", methods=["POST"])
+@api_login_required
 def api_analyze():
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
