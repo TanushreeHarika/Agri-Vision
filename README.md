@@ -604,7 +604,11 @@ A GitHub Actions workflow is fully set up. It will automatically run your entire
 ## Analyze Image (POST Request)
 
 ```bash
-curl -X POST -F "file=@cotton_image.jpg" http://localhost:5000/api/analyze
+curl -X POST http://localhost:5000/api/analyze \
+  -F "file=@cotton_image.jpg" \
+  -F "lat=30.0444" \
+  -F "lon=31.2357" \
+  -F "field_acres=5"
 ```
 
 ---
@@ -614,16 +618,24 @@ curl -X POST -F "file=@cotton_image.jpg" http://localhost:5000/api/analyze
 ```json
 {
   "status": "success",
-  "analysis": {
-    "stage": "Bursting (Ripped)",
-    "stage_confidence": 0.87,
-    "health_status": "Pink Bollworm Damage",
-    "health_confidence": 0.76,
-    "health_score": 68.5,
-    "is_ripped": true,
-    "has_damage": true
+  "timestamp": "2026-06-03T12:00:00.123456",
+  "weather": {
+    "temperature": 32,
+    "humidity": 55,
+    "precipitation": 0
   },
-  "recommendations": ["..."]
+  "results": {
+    "disease": { "predicted_class": "Healthy", "health_score": 82.0 },
+    "growth": { "main_class": "Matured Cotton Boll" },
+    "recommendations": ["..."],
+    "yield_estimate": {
+      "weather_multiplier": 1.0,
+      "weather_notes": ["Weather conditions are favourable for cotton."],
+      "combined_multiplier": 0.612,
+      "stage_multiplier": 0.85,
+      "health_multiplier": 0.72
+    }
+  }
 }
 ```
 

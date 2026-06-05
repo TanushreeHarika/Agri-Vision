@@ -9,6 +9,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 import os
 import random
+import math
 import re
 import threading
 from datetime import datetime
@@ -17,6 +18,7 @@ from werkzeug.utils import secure_filename
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from io import BytesIO
+from services.weather_service import get_weather
 
 import redis
 import base64
@@ -792,9 +794,11 @@ def generate_gradcam_explanation(
     return grad_cam_image_b64, heatmap_only_b64
 
 
-def analyze_image(image: np.ndarray) -> Dict[str, Any]:
+def analyze_image(image: np.ndarray,*,weather:Optional[dict]=None,field_acres: float=1.0) -> Dict[str, Any]:
     import time
     start_time = time.time()
+    field_acres=normalize_field_acres(field_acres)
+    
     
     resnet_model, yolo_model = model_manager.load_models()
     try:
@@ -878,9 +882,9 @@ def analyze_image(image: np.ndarray) -> Dict[str, Any]:
         disease["heatmap_b64"] = grad_cam_image_b64
         disease["heatmap_only_b64"] = heatmap_only_b64
 
-        recs = generate_recommendations(disease, growth)
+        recs = generate_recommendations(disease, growth,weather=weather)
         severity = calculate_disease_severity(disease["health_score"])
-        yield_est = estimate_yield(disease, growth, weather=None, field_acres=1.0)
+        yield_est = estimate_yield(disease, growth, weather=weather, field_acres=field_acres)
         adv_recs = generate_advanced_recommendations(disease, growth)
         treatment_recs = generate_treatment_recommendations(disease)
         insights = generate_farmer_insights(disease, growth)
@@ -899,6 +903,9 @@ def analyze_image(image: np.ndarray) -> Dict[str, Any]:
             "farmer_insights": insights,
         }
 
+        if weather is not None:
+            result["weather"]=weather
+
         if growth.get("main_class") is None:
             fallback_reason = "Growth stage model unavailable in this deployment." if yolo_model is None else "Cotton growth stage could not be detected from the uploaded image."
             result["warnings"] = [
@@ -912,6 +919,60 @@ def analyze_image(image: np.ndarray) -> Dict[str, Any]:
         logger.error("Unexpected error in image analysis: %s", exc)
         return {"error": "The AI model encountered an unexpected error while analyzing the image. Please verify the image file format and content and try again."}
 
+
+#---helper functions------
+def normalize_field_acres(value:object)->float:
+    """Coerce field size to a positive float; invalid or non-positive → 1.0."""
+    try:
+        if value is None or value=="":
+            return 1.0
+        fa=float(value)
+        if fa<=0 or fa!=fa:
+            return 1.0
+        return fa
+    except (TypeError,ValueError):
+        return 1.0
+
+def parse_api_field_acres(raw:object)->Tuple[Optional[float],Optional[str]]:
+    """
+    For POST /api/analyze: missing or blank field_acres → (1.0, None).
+    Present but invalid, non-positive, or non-finite → (None, error message).
+    """
+    if raw is None:
+        return 1.0,None
+    s=str(raw).strip()
+    if s=="":
+        return 1.0,None
+    try:
+        fa=float(s)
+    except (TypeError,ValueError):
+        return None,"field_acres must be a positive number"
+    
+    if not math.isfinite(fa) or fa<=0:
+        return None,"field_acres must be a positive finite number"
+    return fa,None
+
+def resolve_weather_for_analysis(lat:Optional[float]=None,lon:Optional[float]=None,city:Optional[str]=None)->Optional[dict]:
+    """
+    Fetch current weather from lat/lon, or from city name via geocoding.
+    Never raises; returns None if inputs missing or upstream fails.
+    """
+    owm_key=os.getenv("OPENWEATHER_API_KEY")
+    if lat is not None and lon is not None:
+        try:
+            return get_weather(float(lat),float(lon),owm_key)
+        except (TypeError,ValueError):
+            pass
+    
+    if city and str(city).strip():
+        try:
+            geo=geocode_city(str(city).strip())
+            if geo:
+                return get_weather(float(geo["lat"]),float(geo["lon"]),owm_key)
+        except (ValueError,KeyError):
+            pass 
+    
+    return None
 
 def build_comparison_result(old_results: Dict[str, Any], new_results: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(old_results, dict) or not isinstance(new_results, dict):
@@ -1330,30 +1391,20 @@ def analyze():
             file = request.files["file"]
             safe_filename, image, image_rgb, temp_path = read_validated_upload_image(file)
             compressed_rgb = resize_image(image_rgb, MAX_INFERENCE_DIMENSION)
-            results = analyze_image(compressed_rgb)
 
             lat = request.form.get("lat", type=float)
             lon = request.form.get("lon", type=float)
             city = request.form.get("city", type=str)
-            weather = None
+            field_acres=normalize_field_acres(request.form.get("field_acres"))
 
-            if lat is not None and lon is not None:
-                owm_key = os.getenv("OPENWEATHER_API_KEY")
-                weather = get_weather(lat, lon, owm_key)
-            elif city:
-                geo = geocode_city(city)
-                if geo:
-                    owm_key = os.getenv("OPENWEATHER_API_KEY")
-                    weather = get_weather(geo["lat"], geo["lon"], owm_key)
+            weather=resolve_weather_for_analysis(lat=lat,lon=lon,city=city)
 
-            if weather and results.get("disease") and results.get("growth"):
-                results["recommendations"] = (results.get("recommendations", []) + generate_weather_recommendations(weather))[:6]
-                results["weather"] = weather
+            results = analyze_image(compressed_rgb,weather=weather,field_acres=field_acres)
 
             if results.get("error"):
                 raise ValueError(results["error"])
-
-            predicted_class = results.get("disease", {}).get("predicted_class", "")
+            
+            predicted_class = results.get("disease", {}).get("predicted_class", "") or ""
             disease_info = disease_info_map.get(predicted_class, {})
 
             return render_template(
@@ -1726,11 +1777,22 @@ def api_analyze():
 
         file = request.files["file"]
         _safe_filename, image, image_rgb, temp_path = read_validated_upload_image(file)
-        results = analyze_image(image_rgb)
+        field_acres,field_acres_error=parse_api_field_acres(request.form.get("field_acres"))
+        if field_acres_error:
+            return jsonify({"error":field_acres_error}),400
+            
+        lat=request.form.get("lat",type=float)
+        lon=request.form.get("lon",type=float)
+        city=request.form.get("city",type=str)
+        weather=resolve_weather_for_analysis(lat=lat,lon=lon,city=city)
+        compressed_rgb = resize_image(image_rgb, MAX_INFERENCE_DIMENSION)
+        results = analyze_image(compressed_rgb, weather=weather, field_acres=field_acres)
         return jsonify({
             "status": "success",
             "timestamp": datetime.now().isoformat(),
+            "weather": weather,
             "results": results,
+            
         })
     except UploadValidationError as exc:
         logger.warning("API upload rejected: %s", exc)
