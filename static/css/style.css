@@ -1728,7 +1728,9 @@ nav a[href="/model-admin"]:hover {
         backdrop-filter: blur(12px);
         box-shadow: 0 10px 35px rgba(0, 0, 0, 0.18);
     }
-
+    .action-btn{
+    margin-top: 24px;
+}
     .result-card:hover,
     .analysis-card:hover,
     .demo-card:hover {

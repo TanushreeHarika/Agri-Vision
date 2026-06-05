@@ -1262,9 +1262,22 @@ function readInsights() {
     alert("Speech synthesis is not supported in this browser.");
     return;
   }
-  window.speechSynthesis.cancel();
-  var utterance = new SpeechSynthesisUtterance("Here are your crop analysis insights. " + insights.join(" "));
-  window.speechSynthesis.speak(utterance);
+  if (window.speechSynthesis.speaking) {
+
+    if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+    } else {
+        window.speechSynthesis.pause();
+    }
+
+    return;
+}
+
+var utterance = new SpeechSynthesisUtterance(
+    "Here are your crop analysis insights. " + insights.join(" ")
+);
+
+window.speechSynthesis.speak(utterance);
 }
 
 function exportExplainabilityReport() {
