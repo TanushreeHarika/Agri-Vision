@@ -763,9 +763,19 @@ def read_validated_upload_image(file_storage) -> Tuple[str, np.ndarray, np.ndarr
         max_bytes=max_bytes,
     )
     temp_path = save_temp_upload(file_bytes, app.config["UPLOAD_TMP_DIR"], safe_filename)
+
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        img.verify()
+    except Exception:
+        raise UploadValidationError(
+            "Unable to process this image. It may be corrupt or in an unsupported format.",
+            status_code=400,
+        )
+
     image = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
-        raise UploadValidationError("Invalid image file.", status_code=400)
+        raise UploadValidationError("Unable to process this image. It may be corrupt or in an unsupported format.", status_code=400)
     return safe_filename, image, cv2.cvtColor(image, cv2.COLOR_BGR2RGB), temp_path
 
 
@@ -1781,13 +1791,15 @@ def analyze():
                 disease_info=disease_info,
             )
         except UploadValidationError as exc:
-            logger.warning("Upload rejected: %s", exc)
+            filename = request.files.get("file", {}).filename if request.files.get("file") else "unknown"
+            logger.warning("Upload rejected (user=%s, file=%s): %s", current_user.id, filename, exc)
             if exc.status_code == 413:
                 return ("File too large", 413)
             flash(str(exc), "error")
             return redirect(request.url)
         except Exception as exc:
-            logger.error("Analysis error: %s", exc)
+            filename = request.files.get("file", {}).filename if request.files.get("file") else "unknown"
+            logger.error("Analysis error (user=%s, file=%s): %s", current_user.id, filename, exc)
             flash(f"Error during analysis: {str(exc)}", "error")
             return redirect(request.url)
         finally:
@@ -2227,10 +2239,12 @@ def api_analyze():
             
         })
     except UploadValidationError as exc:
-        logger.warning("API upload rejected: %s", exc)
+        filename = request.files.get("file", {}).filename if request.files.get("file") else "unknown"
+        logger.warning("API upload rejected (file=%s): %s", filename, exc)
         return jsonify({"error": str(exc)}), exc.status_code
     except Exception as e:
-        logger.error(f"API analysis error: {e}")
+        filename = request.files.get("file", {}).filename if request.files.get("file") else "unknown"
+        logger.error("API analysis error (file=%s): %s", filename, e)
         return jsonify({"error": str(e)}), 500
     finally:
         cleanup_temp_upload(temp_path)
