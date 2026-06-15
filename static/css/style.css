@@ -692,12 +692,13 @@ nav a[href="/model-admin"]:hover {
 
 /* Hero typography */
 .hero-content h1 {
-    font-size: 3.2rem;
-    line-height: 1.15;
+    font-size: 3.5rem;
+    line-height: 1.2;
     color: var(--deep-forest);
     margin-bottom: 1.5rem;
     font-weight: 800;
-    letter-spacing: -1px;
+    letter-spacing: -1.5px;
+    max-width: 600px;
 }
 
 .hero-content h1 span {
@@ -709,11 +710,12 @@ nav a[href="/model-admin"]:hover {
 }
 
 .hero-content p {
-    font-size: 1.15rem;
+    font-size: 1.25rem;
     color: var(--warm-earth);
     margin-bottom: 2.5rem;
-    max-width: 550px;
-    line-height: 1.6;
+    max-width: 580px;
+    line-height: 1.7;
+    letter-spacing: 0.2px;
 }
 
 .hero-cta {
@@ -727,10 +729,11 @@ nav a[href="/model-admin"]:hover {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    line-height: 1.1;
+    line-height: 1.2;
     width: 100%;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-start;
+    justify-content: flex-start;
+    min-height: 120px; /* Stabilize layout against typewriter shifting */
 }
 
 .typewriter span {
@@ -743,6 +746,39 @@ nav a[href="/model-admin"]:hover {
 .typewriter .line1,
 .typewriter .line2 {
     border-right: 3px solid #4ade80;
+}
+
+/* Trust Indicators */
+.hero-trust {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--card-border);
+    opacity: 0.9;
+}
+
+.trust-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: center;
+}
+
+.trust-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.trust-item i {
+    color: var(--emerald-green);
+    font-size: 1.1rem;
+}
+
+.trust-item strong {
+    color: var(--text-main);
+    font-weight: 700;
 }
 
 /* Hero image / scanner */
@@ -762,9 +798,10 @@ nav a[href="/model-admin"]:hover {
     box-shadow: var(--card-shadow);
     transition: var(--transition-smooth);
     height: 350px;
-    width: 500px;
-    max-width: 100%;
+    width: 100%;
+    max-width: 500px;
     box-sizing: border-box;
+    opacity: 0.95; /* Adjust intensity slightly */
 }
 
 .scanner-container:hover {
@@ -1051,9 +1088,10 @@ nav a[href="/model-admin"]:hover {
 
     .hero-content p { max-width: 650px; margin-left: auto; margin-right: auto; }
     .scanner-container { width: 100%; max-width: 450px; height: auto; }
-    .typewriter { align-items: center; }
+    .typewriter { align-items: center; min-height: auto; }
     .hero-cta { justify-content: center; flex-wrap: wrap; }
     .hero-badge-wrapper { display: flex; justify-content: center; }
+    .trust-strip { justify-content: center; }
 }
 
 @media (max-width: 768px) {
@@ -3608,4 +3646,33 @@ input[type="range"]::-moz-range-thumb:hover {
     }
 }
 
+/* ========== HERO ACCESSIBILITY ENHANCEMENTS ========== */
+.hero-cta .btn:focus-visible {
+    outline: 3px solid var(--ai-blue);
+    outline-offset: 4px;
+    box-shadow: 0 0 0 4px rgba(74, 144, 226, 0.3);
+}
 
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    
+    .blob {
+        animation: none !important;
+    }
+    
+    .scanner-laser,
+    .telemetry-pulse::after,
+    .telemetry-icon-spin,
+    .floating-telemetry-1,
+    .floating-telemetry-2,
+    .badge-dot::after {
+        animation: none !important;
+    }
+}

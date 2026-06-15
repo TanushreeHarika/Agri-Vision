@@ -63,6 +63,9 @@ from security_utils import (
     save_temp_upload,
     validate_image_upload,
 )
+from auth.authorization import require_role, require_any_role, require_permission
+from models import Role, Permission, RolePermission, UserRole
+
 
 load_dotenv()
 
@@ -1205,10 +1208,8 @@ def stories():
 
 @app.route("/model-admin")
 @login_required
+@require_any_role(['researcher', 'admin'])
 def admin_dashboard():
-    if not current_user.is_researcher():
-        flash('Access denied. Researchers and Admins only.', 'danger')
-        return redirect(url_for('index'))
     return render_template("admin.html")
 
 
@@ -3776,3 +3777,35 @@ if __name__ == '__main__':
     
     is_debug = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "t")
     app.run(debug=is_debug, host="0.0.0.0", port=5000)
+
+# --- RBAC Management APIs ---
+
+@app.route('/api/admin/roles', methods=['GET', 'POST'])
+@login_required
+@require_role('admin')
+def api_admin_roles():
+    from auth.audit_log import log_audit_event
+    if request.method == 'POST':
+        data = request.get_json()
+        role = Role(name=data['name'], slug=data['slug'], description=data.get('description'))
+        db.session.add(role)
+        db.session.commit()
+        log_audit_event("ROLE_CREATED", f"Role {role.slug} created", user_id=current_user.id)
+        return jsonify({"status": "success", "id": role.id})
+    roles = Role.query.filter_by(deleted_at=None).all()
+    return jsonify([{"id": r.id, "name": r.name, "slug": r.slug} for r in roles])
+
+@app.route('/api/admin/permissions', methods=['GET', 'POST'])
+@login_required
+@require_role('admin')
+def api_admin_permissions():
+    from auth.audit_log import log_audit_event
+    if request.method == 'POST':
+        data = request.get_json()
+        perm = Permission(name=data['name'], slug=data['slug'])
+        db.session.add(perm)
+        db.session.commit()
+        log_audit_event("PERMISSION_CREATED", f"Permission {perm.slug} created", user_id=current_user.id)
+        return jsonify({"status": "success", "id": perm.id})
+    perms = Permission.query.all()
+    return jsonify([{"id": p.id, "name": p.name, "slug": p.slug} for p in perms])
